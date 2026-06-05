@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>InterviewSense AI</title>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&display=swap" rel="stylesheet">
+
+  <!-- Markdown renderer -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════════════
+     GATEWAY
+══════════════════════════════════════════════════════════ -->
+<div id="gateway">
+  <div class="gw-inner">
+    <div class="gw-logo">InterviewSense AI</div>
+    <h1 class="gw-title">Your Adaptive<br>Intelligence Suite</h1>
+    <p class="gw-sub">
+      Build career roadmaps, ace technical interviews,<br>
+      and produce professional-grade academic work — all in one place.
+    </p>
+    <div class="portal-grid">
+      <button class="portal-card study" id="choose-study" type="button">
+        <div class="card-badge">ST</div>
+        <h3>Study & Research</h3>
+        <p>Upload documents, generate exam notes, assignments, research papers, and professional reports.</p>
+        <div class="card-arrow">Enter Workspace →</div>
+      </button>
+      <button class="portal-card career" id="choose-career" type="button">
+        <div class="card-badge">CA</div>
+        <h3>Career Accelerator</h3>
+        <p>Build adaptive learning roadmaps, track daily progress, and run simulated technical mock interviews.</p>
+        <div class="card-arrow">Launch Suite →</div>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     APP SHELL
+══════════════════════════════════════════════════════════ -->
+<div id="app">
+
+  <!-- TOPBAR -->
+  <div class="topbar">
+    <button class="tb-btn" id="sidebar-toggle" style="padding:0 10px;font-size:16px;" title="Toggle sidebar">☰</button>
+    <span class="topbar-logo">Interview<span>Sense</span></span>
+    <span class="env-badge study" id="env-badge">📚 Study Mode</span>
+
+    <div class="topbar-actions">
+      <button class="notif-btn" id="notif-btn" title="Notifications">
+        🔔
+        <div class="notif-dot" id="notif-dot"></div>
+      </button>
+      <button class="tb-btn" id="switch-btn">Switch Workspace</button>
+    </div>
+  </div>
+
+  <!-- BODY -->
+  <div class="main-layout">
+
+    <!-- SIDEBAR -->
+    <div class="sidebar" id="sidebar">
+      <div class="sidebar-head">
+        <h3>Sessions</h3>
+        <button class="new-chat-btn" id="new-chat-btn" title="New session">+</button>
+      </div>
+      <div id="chat-list"></div>
+    </div>
+
+    <!-- CONTENT -->
+    <div class="content-area">
+
+      <!-- CAREER CONFIG BAR -->
+      <div id="career-config-bar">
+        <div class="cc-field">
+          <span class="cc-label">Target Role</span>
+          <input type="text" class="cc-input" id="cc-role" value="Python Developer" size="20" placeholder="e.g. Python Developer">
+        </div>
+        <div class="cc-field">
+          <span class="cc-label">Duration</span>
+          <select class="cc-input" id="cc-duration">
+            <option value="30 days">30 Days</option>
+            <option value="60 days">60 Days</option>
+          </select>
+        </div>
+        <div class="cc-field">
+          <span class="cc-label">Hours / Day</span>
+          <select class="cc-input" id="cc-hours">
+            <option value="2">2 hrs</option>
+            <option value="4">4 hrs</option>
+          </select>
+        </div>
+        <div class="cc-field">
+          <span class="cc-label">Experience</span>
+          <select class="cc-input" id="cc-level">
+            <option value="beginner">Beginner</option>
+            <option value="intermediate">Intermediate</option>
+          </select>
+        </div>
+        <div class="cc-field">
+          <span class="cc-label">DSA Track</span>
+          <select class="cc-input" id="cc-dsa">
+            <option value="yes">Enabled</option>
+            <option value="no">Disabled</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- STUDY TOOLBAR -->
+      <div id="study-toolbar">
+        <button class="task-pill active" data-task="notes"      type="button">📝 Notes</button>
+        <button class="task-pill"        data-task="assignment" type="button">📋 Assignment</button>
+        <button class="task-pill"        data-task="research"   type="button">🔬 Research</button>
+        <button class="task-pill"        data-task="report"     type="button">📊 Report</button>
+        <button class="task-pill"        data-task="explainer"  type="button">💡 Explainer</button>
+        <select id="mode-select" class="mode-select">
+          <option>2 Marks</option>
+          <option>5 Marks</option>
+          <option selected>10 Marks</option>
+        </select>
+      </div>
+
+      <!-- CHAT VIEW -->
+      <div id="chat-view">
+        <div id="messages-wrap"></div>
+
+        <!-- TRACKER PANEL -->
+        <div id="tracker-panel">
+          <div class="tp-head">
+            <h4>Curriculum Progress</h4>
+            <div class="tp-stats">
+              <div class="tp-stat">
+                <div class="tp-stat-n done" id="stat-done">0</div>
+                <div class="tp-stat-l">Done</div>
+              </div>
+              <div class="tp-stat">
+                <div class="tp-stat-n fail" id="stat-fail">0</div>
+                <div class="tp-stat-l">Failed</div>
+              </div>
+              <div class="tp-stat">
+                <div class="tp-stat-n pend" id="stat-pend">0</div>
+                <div class="tp-stat-l">Left</div>
+              </div>
+            </div>
+            <div class="tp-streak" id="tp-streak" style="display:none;"></div>
+          </div>
+          <div id="tracker-grid"></div>
+        </div>
+
+        <!-- NOTIFICATION PANEL -->
+        <div id="notif-panel">
+          <div class="np-head">
+            <h3>Notifications</h3>
+            <button class="np-close" id="np-close" type="button">✕</button>
+          </div>
+          <div id="notif-list">
+            <div class="np-empty" id="np-empty">No notifications yet</div>
+          </div>
+          <button class="np-clear" id="np-clear" type="button">Clear all</button>
+        </div>
+      </div>
+
+      <!-- INPUT ZONE -->
+      <div class="input-zone">
+        <!-- File preview badge -->
+        <div id="file-badge">
+          <span>📎</span>
+          <span id="file-name"></span>
+          <button class="fb-clear" id="file-badge-clear" type="button" title="Remove file">✕</button>
+        </div>
+
+        <div class="input-row">
+          <!-- Hidden file input -->
+          <input type="file" id="file-input" accept=".pdf,.pptx,.docx,.txt" hidden>
+
+          <!-- Attach / tools button -->
+          <div class="attach-wrap">
+            <button class="attach-btn" id="attach-btn" type="button" title="Tools">⊕</button>
+            <div class="attach-menu" id="attach-menu">
+              <button class="am-item" data-action="upload"   type="button">📎 Upload Document</button>
+              <button class="am-item" data-task="notes"      type="button">📝 Exam Notes</button>
+              <button class="am-item" data-task="assignment" type="button">📋 Assignment</button>
+              <button class="am-item" data-task="research"   type="button">🔬 Research Paper</button>
+              <button class="am-item" data-task="report"     type="button">📊 Business Report</button>
+              <button class="am-item" data-task="explainer"  type="button">💡 Concept Explainer</button>
+            </div>
+          </div>
+
+          <!-- Message input -->
+          <textarea id="user-input" rows="1" placeholder="Ask anything…"></textarea>
+
+          <!-- Send -->
+          <button class="send-btn" id="send-btn" type="button" title="Send">➤</button>
+        </div>
+      </div>
+
+    </div><!-- /content-area -->
+  </div><!-- /main-layout -->
+</div><!-- /app -->
+
+<!-- ── Scripts (order matters) ───────────────────────────── -->
+<script src="scripts/config.js?v=20260605-2"></script>
+<script src="scripts/store.js?v=20260605-2"></script>
+<script src="scripts/api.js?v=20260605-2"></script>
+<script src="scripts/ui.js?v=20260605-2"></script>
+<script src="scripts/chat.js?v=20260605-2"></script>
+<script src="scripts/app.js?v=20260605-2"></script>
+
+</body>
+</html>

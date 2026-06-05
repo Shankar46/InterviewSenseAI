@@ -1,0 +1,1056 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>InterviewSense AI</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:ital,wght=0,300;0,400;0,500;1,300&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+:root {
+  --bg: #0d0f14;
+  --bg2: #131620;
+  --bg3: #1a1d2e;
+  --surface: #1f2236;
+  --surface2: #252840;
+  --border: rgba(255,255,255,0.06);
+  --border2: rgba(255,255,255,0.12);
+  --text: #e8eaf2;
+  --text2: #9097b8;
+  --text3: #5a6080;
+  --accent: #6c63ff;
+  --accent2: #8b85ff;
+  --teal: #0fd4a0;
+  --teal2: #0ab882;
+  --amber: #f5a623;
+  --red: #f06060;
+  --green: #4caf76;
+  --font-display: 'Syne', sans-serif;
+  --font-body: 'DM Sans', sans-serif;
+  --r: 12px;
+  --r2: 8px;
+  --r3: 20px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font-body); background: var(--bg); color: var(--text); min-height: 100vh; overflow: hidden; }
+
+/* ── GATEWAY PORTAL MULTI-COLUMN INTERFACE ────────────────── */
+#gateway {
+  position: fixed; inset: 0; z-index: 100;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg);
+}
+#gateway::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse 60% 50% at 50% 30%, rgba(108,99,255,0.12) 0%, transparent 70%),
+              radial-gradient(ellipse 40% 40% at 20% 80%, rgba(15,212,160,0.06) 0%, transparent 60%);
+  pointer-events: none;
+}
+.gw-inner { text-align: center; max-width: 960px; padding: 2rem; position: relative; }
+.gw-logo { font-family: var(--font-display); font-size: 13px; font-weight: 600; letter-spacing: 3px; text-transform: uppercase; color: var(--accent2); margin-bottom: 2.5rem; }
+.gw-title { font-family: var(--font-display); font-size: clamp(2.2rem, 5vw, 3.5rem); font-weight: 800; line-height: 1.1; margin-bottom: 1rem; background: linear-gradient(135deg, #e8eaf2 0%, #9097b8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.gw-sub { color: var(--text2); font-size: 1.05rem; font-weight: 300; margin-bottom: 3rem; line-height: 1.6; }
+.portal-grid { display: grid; grid-template-columns: 1fr; gap: 1rem; }
+
+@media (min-width: 901px) {
+  .portal-grid { grid-template-columns: 1fr 1fr 1fr; }
+}
+
+.portal-card {
+  background: var(--surface); border: 1px solid var(--border2);
+  border-radius: var(--r3); padding: 1.75rem; text-align: left;
+  cursor: pointer; transition: all 0.2s; position: relative; overflow: hidden;
+  width: 100%;
+}
+.portal-card::before {
+  content: ''; position: absolute; inset: 0; border-radius: var(--r3);
+  opacity: 0; transition: opacity 0.2s;
+}
+.portal-card.study::before { background: radial-gradient(circle at 20% 20%, rgba(108,99,255,0.15), transparent 60%); }
+.portal-card.career::before { background: radial-gradient(circle at 20% 20%, rgba(15,212,160,0.12), transparent 60%); }
+.portal-card.interview::before { background: radial-gradient(circle at 20% 20%, rgba(245,166,35,0.12), transparent 60%); }
+.portal-card:hover { transform: translateY(-3px); border-color: var(--border2); }
+.portal-card:hover::before { opacity: 1; }
+.portal-card.career { border-color: rgba(15,212,160,0.2); }
+.portal-card.interview { border-color: rgba(245,166,35,0.2); }
+
+.card-badge { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: var(--r); margin-bottom: 1rem; font-family: var(--font-display); font-weight: 700; font-size: 14px; }
+.portal-card.study .card-badge { background: rgba(108,99,255,0.15); color: var(--accent2); }
+.portal-card.career .card-badge { background: rgba(15,212,160,0.12); color: var(--teal); }
+.portal-card.interview .card-badge { background: rgba(245,166,35,0.12); color: var(--amber); }
+
+.portal-card h3 { font-family: var(--font-display); font-weight: 600; font-size: 1.05rem; margin-bottom: 0.5rem; }
+.portal-card p { color: var(--text2); font-size: 0.85rem; line-height: 1.5; font-weight: 300; }
+.card-arrow { margin-top: 1.25rem; font-size: 0.8rem; font-weight: 500; letter-spacing: 1px; text-transform: uppercase; }
+.portal-card.study .card-arrow { color: var(--accent2); }
+.portal-card.career .card-arrow { color: var(--teal); }
+.portal-card.interview .card-arrow { color: var(--amber); }
+
+/* ── APP SHELL ────────────────────────────────────────────── */
+#app { display: none; height: 100vh; flex-direction: column; }
+#app.active { display: flex; }
+
+/* ── TOPBAR ───────────────────────────────────────────────── */
+.topbar {
+  height: 56px; flex-shrink: 0;
+  display: flex; align-items: center; gap: 12px;
+  padding: 0 1.25rem; border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+}
+.topbar-logo { font-family: var(--font-display); font-weight: 700; font-size: 15px; color: var(--text); }
+.topbar-logo span { color: var(--accent2); }
+.topbar-badge {
+  font-size: 11px; font-weight: 500; padding: 3px 10px;
+  border-radius: 20px; letter-spacing: 0.5px;
+}
+.topbar-badge.study { background: rgba(108,99,255,0.15); color: var(--accent2); }
+.topbar-badge.career { background: rgba(15,212,160,0.12); color: var(--teal); }
+.topbar-badge.interview { background: rgba(245,166,35,0.15); color: var(--amber); }
+.topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+#notif-btn {
+  position: relative; background: none; border: 1px solid var(--border2);
+  border-radius: var(--r2); width: 34px; height: 34px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; color: var(--text2);
+  transition: all 0.15s;
+}
+#notif-btn:hover { border-color: var(--accent); color: var(--accent2); }
+#notif-dot { position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; background: var(--red); border-radius: 50%; display: none; }
+#notif-dot.active { display: block; }
+.tb-btn {
+  background: none; border: 1px solid var(--border2); border-radius: var(--r2);
+  padding: 0 14px; height: 34px; color: var(--text2); font-family: var(--font-body);
+  font-size: 13px; cursor: pointer; transition: all 0.15s; white-space: nowrap;
+}
+.tb-btn:hover { border-color: var(--border2); color: var(--text); }
+#switch-btn { color: var(--text3); font-size: 12px; }
+
+/* ── MAIN LAYOUT ──────────────────────────────────────────── */
+.main-layout { display: flex; flex: 1; overflow: hidden; }
+
+/* ── SIDEBAR ──────────────────────────────────────────────── */
+.sidebar {
+  width: 240px; flex-shrink: 0;
+  background: var(--bg2); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow: hidden;
+  transition: width 0.2s, opacity 0.2s;
+}
+.sidebar.collapsed { width: 0; opacity: 0; pointer-events: none; }
+.sidebar-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 1rem; border-bottom: 1px solid var(--border);
+}
+.sidebar-head h3 { font-size: 12px; font-weight: 500; letter-spacing: 1px; text-transform: uppercase; color: var(--text3); }
+#new-chat-btn {
+  width: 26px; height: 26px; background: var(--surface); border: 1px solid var(--border2);
+  border-radius: var(--r2); cursor: pointer; color: var(--text2); font-size: 16px;
+  display: flex; align-items: center; justify-content: center; transition: all 0.15s;
+}
+#new-chat-btn:hover { background: var(--surface2); color: var(--text); }
+#chat-list { flex: 1; overflow-y: auto; padding: 0.5rem; }
+.chat-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 10px; border-radius: var(--r2); cursor: pointer;
+  margin-bottom: 2px; transition: background 0.1s; gap: 6px;
+}
+.chat-item:hover, .chat-item.active { background: var(--surface); }
+.chat-item.active { background: var(--surface2); }
+.chat-title-el { font-size: 13px; color: var(--text2); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-item.active .chat-title-el { color: var(--text); }
+.ci-actions { display: none; gap: 4px; }
+.chat-item:hover .ci-actions { display: flex; }
+.ci-btn { background: none; border: none; cursor: pointer; color: var(--text3); font-size: 11px; padding: 2px 4px; border-radius: 4px; transition: all 0.1s; }
+.ci-btn:hover { color: var(--text); background: var(--surface2); }
+
+/* ── CONTENT AREA ─────────────────────────────────────────── */
+.content-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+
+/* ── CONFIG BARS LAYER ────────────────────────────────────── */
+#career-config-bar, #interview-config-bar {
+  display: none; padding: 0.75rem 1.25rem;
+  background: var(--bg2); border-bottom: 1px solid var(--border);
+  overflow-x: auto; gap: 12px; align-items: center; flex-wrap: nowrap;
+}
+#career-config-bar.visible { display: flex; }
+.cc-field { display: flex; flex-direction: column; gap: 3px; flex-shrink: 0; }
+.cc-label { font-size: 10px; font-weight: 500; letter-spacing: 0.8px; text-transform: uppercase; color: var(--text3); }
+.cc-input {
+  background: var(--surface); border: 1px solid var(--border2); border-radius: var(--r2);
+  padding: 5px 10px; color: var(--text); font-family: var(--font-body); font-size: 13px;
+  outline: none; transition: border-color 0.15s; height: 32px;
+}
+.cc-input:focus { border-color: var(--accent); }
+
+/* ── STUDY TOOLBAR ────────────────────────────────────────── */
+#study-toolbar {
+  display: none; padding: 0.6rem 1.25rem;
+  background: var(--bg2); border-bottom: 1px solid var(--border);
+  gap: 8px; align-items: center;
+}
+#study-toolbar.visible { display: flex; }
+.task-pill {
+  font-size: 12px; font-weight: 500; padding: 4px 12px; border-radius: 20px;
+  border: 1px solid transparent; cursor: pointer; transition: all 0.15s;
+  color: var(--text3); background: none;
+}
+.task-pill:hover { color: var(--text2); }
+.task-pill.active { background: rgba(108,99,255,0.15); border-color: rgba(108,99,255,0.3); color: var(--accent2); }
+.mode-select {
+  margin-left: auto; background: var(--surface); border: 1px solid var(--border2);
+  border-radius: var(--r2); padding: 4px 8px; color: var(--text2);
+  font-family: var(--font-body); font-size: 12px; outline: none;
+}
+
+/* ── MESSAGES ENGINE VIEW ─────────────────────────────────── */
+#chat-view { flex: 1; display: flex; overflow: hidden; position: relative; }
+#messages-wrap { flex: 1; overflow-y: auto; padding: 1.5rem 1.25rem; display: flex; flex-direction: column; gap: 1rem; }
+.msg { max-width: 820px; width: 100%; }
+.msg.user { margin-left: auto; max-width: 70%; }
+.msg.user .bubble {
+  background: var(--surface2); border: 1px solid var(--border2);
+  border-radius: var(--r) var(--r) 4px var(--r); padding: 10px 14px;
+  color: var(--text); font-size: 14px; line-height: 1.6;
+}
+.msg.assistant { margin-right: auto; max-width: 90%; }
+.msg.assistant .bubble {
+  background: transparent; padding: 2px 0;
+  font-size: 14px; line-height: 1.7; color: var(--text);
+}
+.msg.assistant .bubble h1,.msg.assistant .bubble h2,.msg.assistant .bubble h3 {
+  font-family: var(--font-display); color: var(--text); margin: 1rem 0 0.4rem;
+}
+.msg.assistant .bubble h1 { font-size: 1.3rem; }
+.msg.assistant .bubble h2 { font-size: 1.1rem; }
+.msg.assistant .bubble h3 { font-size: 1rem; }
+.msg.assistant .bubble strong { color: var(--text); }
+.msg.assistant .bubble code { background: var(--surface2); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+.msg.assistant .bubble pre { background: var(--surface2); padding: 12px; border-radius: var(--r2); overflow-x: auto; margin: 0.5rem 0; }
+.msg.assistant .bubble ul,.msg.assistant .bubble ol { padding-left: 1.2rem; margin: 0.4rem 0; }
+.msg.assistant .bubble li { margin-bottom: 3px; }
+.msg.assistant .bubble p { margin-bottom: 0.5rem; }
+.msg.assistant .bubble hr { border-color: var(--border); margin: 0.8rem 0; border-style: solid; border-width: 0 0 1px 0; }
+.typing-dots { display: flex; gap: 5px; padding: 8px 0; }
+.typing-dots span { width: 6px; height: 6px; background: var(--text3); border-radius: 50%; animation: dot-blink 1.2s ease infinite; }
+.typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes dot-blink { 0%,80%,100%{opacity:0.3} 40%{opacity:1} }
+.empty-state {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  flex-direction: column; gap: 0.75rem; text-align: center; padding: 2rem; width: 100%;
+}
+.empty-icon { font-size: 2rem; opacity: 0.3; }
+.empty-title { font-family: var(--font-display); font-size: 1.1rem; color: var(--text2); }
+.empty-sub { font-size: 13px; color: var(--text3); max-width: 300px; line-height: 1.5; }
+
+/* ── TRACKER PANEL ────────────────────────────────────────── */
+#tracker-panel {
+  width: 220px; flex-shrink: 0; border-left: 1px solid var(--border);
+  background: var(--bg2); display: none; flex-direction: column; overflow: hidden;
+}
+#tracker-panel.visible { display: flex; }
+.tp-head { padding: 1rem; border-bottom: 1px solid var(--border); }
+.tp-head h4 { font-family: var(--font-display); font-size: 12px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: var(--text3); }
+.tp-stats { display: flex; gap: 8px; margin-top: 8px; }
+.tp-stat { flex: 1; background: var(--surface); border-radius: var(--r2); padding: 6px 8px; text-align: center; }
+.tp-stat-n { font-family: var(--font-display); font-size: 1.1rem; font-weight: 700; }
+.tp-stat-n.done { color: var(--teal); }
+.tp-stat-n.fail { color: var(--red); }
+.tp-stat-n.pend { color: var(--text3); }
+.tp-stat-l { font-size: 10px; color: var(--text3); margin-top: 1px; }
+#tracker-grid { flex: 1; overflow-y: auto; padding: 0.75rem; display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start; }
+.day-box {
+  width: 38px; height: 38px; border-radius: var(--r2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 600; cursor: pointer;
+  transition: transform 0.1s, box-shadow 0.15s; position: relative;
+  border: 1px solid transparent;
+}
+.day-box:hover { transform: scale(1.1); }
+.day-box.pending { background: var(--surface2); color: var(--text3); border-color: var(--border); }
+.day-box.completed { background: rgba(15,212,160,0.15); color: var(--teal); border-color: rgba(15,212,160,0.25); }
+.day-box.failed { background: rgba(240,96,96,0.12); color: var(--red); border-color: rgba(240,96,96,0.2); }
+.day-box.current { box-shadow: 0 0 0 2px var(--accent); background: rgba(108,99,255,0.15); color: var(--accent2); border-color: transparent; }
+
+/* ── NOTIFICATION PANEL ───────────────────────────────────── */
+#notif-panel {
+  position: absolute; top: 0; right: 0; bottom: 0;
+  width: 340px; background: var(--bg2); border-left: 1px solid var(--border);
+  z-index: 50; display: none; flex-direction: column; overflow: hidden;
+  transform: translateX(100%); transition: transform 0.2s;
+}
+#notif-panel.open { display: flex; transform: translateX(0); }
+.np-head { padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.np-head h3 { font-family: var(--font-display); font-size: 14px; font-weight: 600; }
+#close-notif { background: none; border: none; cursor: pointer; color: var(--text3); font-size: 18px; }
+#notif-list { flex: 1; overflow-y: auto; padding: 0.75rem; display: flex; flex-direction: column; gap: 8px; }
+.notif-item {
+  background: var(--surface); border-radius: var(--r2); padding: 12px;
+  border-left: 3px solid transparent; font-size: 13px;
+}
+.notif-item.reminder { border-color: var(--amber); }
+.notif-item.success { border-color: var(--teal); }
+.notif-item.warning { border-color: var(--red); }
+.notif-item .ni-title { font-weight: 500; margin-bottom: 3px; color: var(--text); }
+.notif-item .ni-body { color: var(--text2); font-size: 12px; line-height: 1.4; }
+.notif-item .ni-time { color: var(--text3); font-size: 11px; margin-top: 5px; }
+.np-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text3); font-size: 13px; }
+
+/* ── INPUT AREA ───────────────────────────────────────────── */
+.input-zone { padding: 0.75rem 1.25rem; border-top: 1px solid var(--border); background: var(--bg2); }
+#file-badge {
+  display: none; align-items: center; gap: 8px; margin-bottom: 8px;
+  background: var(--surface); border: 1px solid var(--border2); border-radius: var(--r2);
+  padding: 5px 10px; font-size: 12px; color: var(--text2); width: fit-content;
+}
+#file-badge.visible { display: flex; }
+#file-badge-clear { background: none; border: none; cursor: pointer; color: var(--text3); font-size: 14px; margin-left: auto; }
+.input-row { display: flex; align-items: flex-end; gap: 8px; }
+#attach-wrap { position: relative; flex-shrink: 0; }
+#attach-btn {
+  width: 36px; height: 36px; background: var(--surface); border: 1px solid var(--border2);
+  border-radius: var(--r2); cursor: pointer; color: var(--text2); font-size: 18px;
+  display: flex; align-items: center; justify-content: center; transition: all 0.15s;
+}
+#attach-btn:hover { border-color: var(--accent); color: var(--accent2); }
+#attach-menu {
+  position: absolute; bottom: 44px; left: 0;
+  background: var(--surface); border: 1px solid var(--border2); border-radius: var(--r);
+  padding: 6px; display: none; flex-direction: column; gap: 2px;
+  min-width: 200px; z-index: 20;
+}
+#attach-menu.open { display: flex; }
+.am-item {
+  background: none; border: none; padding: 7px 10px; border-radius: var(--r2);
+  color: var(--text2); font-size: 13px; cursor: pointer; text-align: left;
+  font-family: var(--font-body); transition: all 0.1s; white-space: nowrap;
+  width: 100%;
+}
+.am-item:hover { background: var(--surface2); color: var(--text); }
+#user-input {
+  flex: 1; background: var(--surface); border: 1px solid var(--border2);
+  border-radius: var(--r2); padding: 8px 12px; color: var(--text);
+  font-family: var(--font-body); font-size: 14px; outline: none;
+  resize: none; max-height: 140px; min-height: 36px; line-height: 1.5;
+  transition: border-color 0.15s;
+}
+#user-input:focus { border-color: var(--accent); }
+#user-input::placeholder { color: var(--text3); }
+#send-btn {
+  width: 36px; height: 36px; background: var(--accent); border: none;
+  border-radius: var(--r2); cursor: pointer; color: #fff; font-size: 16px;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s; flex-shrink: 0;
+}
+#send-btn:hover { background: var(--accent2); }
+#send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── SCROLLBAR ────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+/* ── RESPONSIVE ───────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .sidebar { position: absolute; height: calc(100% - 56px); z-index: 30; top: 56px; left: 0; }
+  #tracker-panel { display: none !important; }
+  .portal-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<div id="gateway">
+  <div class="gw-inner">
+    <div class="gw-logo">InterviewSense AI</div>
+    <h1 class="gw-title">Your Adaptive<br>Intelligence Suite</h1>
+    <p class="gw-sub">Powered by advanced AI — build career roadmaps, ace interviews,<br>and produce professional-grade academic research.</p>
+    <div class="portal-grid">
+      <button class="portal-card study" id="choose-study" type="button">
+        <div class="card-badge">ST</div>
+        <h3>Study & Research</h3>
+        <p>Upload documents, generate exam notes, assignments, research papers, and professional reports.</p>
+        <div class="card-arrow">Enter Workspace →</div>
+      </button>
+      <button class="portal-card career" id="choose-career" type="button">
+        <div class="card-badge">CA</div>
+        <h3>Career Accelerator</h3>
+        <p>Build adaptive learning roadmaps, track daily progress, and simulate technical mock interviews.</p>
+        <div class="card-arrow">Launch Suite →</div>
+      </button>
+      <button class="portal-card interview" id="choose-interview" type="button">
+        <div class="card-badge">IA</div>
+        <h3>Interview Assistant</h3>
+        <p>Simulate realistic, company-specific technical rounds based on JDs, your resume, and your actual daily tracker logs.</p>
+        <div class="card-arrow">Start Prep →</div>
+      </button>
+    </div>
+  </div>
+</div>
+
+<div id="app">
+  <div class="topbar">
+    <button id="sidebar-toggle" class="tb-btn" style="padding:0 10px; font-size:16px;">☰</button>
+    <span class="topbar-logo">Interview<span>Sense</span></span>
+    <span class="topbar-badge study" id="env-badge">Study Mode</span>
+    <div class="topbar-actions">
+      <button id="notif-btn" title="Notifications">
+        🔔
+        <div id="notif-dot"></div>
+      </button>
+      <button class="tb-btn" id="switch-btn">Switch Workspace</button>
+    </div>
+  </div>
+
+  <div class="main-layout">
+    <div class="sidebar" id="sidebar">
+      <div class="sidebar-head">
+        <h3>Sessions</h3>
+        <button id="new-chat-btn" title="New Chat">+</button>
+      </div>
+      <div id="chat-list"></div>
+    </div>
+
+    <div class="content-area">
+
+      <div id="career-config-bar">
+        <div class="cc-field">
+          <span class="cc-label">Target Role</span>
+          <input type="text" class="cc-input" id="cc-role" value="Python Developer" style="width:160px">
+        </div>
+        <div class="cc-field">
+          <span class="cc-label">Duration</span>
+          <select class="cc-input" id="cc-duration">
+            <option value="30 days">30 Days</option>
+            <option value="60 days">60 Days</option>
+          </select>
+        </div>
+        <div class="cc-field">
+          <span class="cc-label">Hours/Day</span>
+          <select class="cc-input" id="cc-hours">
+            <option value="2">2 hrs</option>
+            <option value="4">4 hrs</option>
+          </select>
+        </div>
+        <div class="cc-field">
+          <span class="cc-label">Experience</span>
+          <select class="cc-input" id="cc-level">
+            <option value="beginner">Beginner</option>
+            <option value="intermediate">Intermediate</option>
+          </select>
+        </div>
+        <div class="cc-field">
+          <span class="cc-label">DSA Track</span>
+          <select class="cc-input" id="cc-dsa">
+            <option value="yes">Enabled</option>
+            <option value="no">Disabled</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="interview-config-bar">
+        <div class="cc-field">
+          <span class="cc-label">Target Company</span>
+          <input type="text" class="cc-input" id="ic-company" value="Google" style="width:130px">
+        </div>
+        <div class="cc-field">
+          <span class="cc-label">Role</span>
+          <input type="text" class="cc-input" id="ic-role" value="AI/ML Engineer" style="width:140px">
+        </div>
+        <div class="cc-field">
+          <span class="cc-label">Paste JD Snippet</span>
+          <input type="text" class="cc-input" id="ic-jd" placeholder="Key skills required..." style="width:200px">
+        </div>
+        <div class="cc-field">
+          <span class="cc-label">Round Type</span>
+          <select class="cc-input" id="ic-round">
+            <option value="technical">Technical Coding/Core</option>
+            <option value="system_design">System Design</option>
+            <option value="behavioral">Behavioral / HR</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="study-toolbar">
+        <button class="task-pill active" data-task="notes" type="button">📝 Notes</button>
+        <button class="task-pill" data-task="assignment" type="button">📋 Assignment</button>
+        <button class="task-pill" data-task="research" type="button">🔬 Research</button>
+        <button class="task-pill" data-task="report" type="button">📊 Report</button>
+        <button class="task-pill" data-task="explainer" type="button">💡 Explainer</button>
+        <select class="mode-select" id="mode-select">
+          <option>2 Marks</option>
+          <option>5 Marks</option>
+          <option selected>10 Marks</option>
+        </select>
+      </div>
+
+      <div id="chat-view">
+        <div id="messages-wrap">
+          <div class="empty-state" id="empty-state">
+            <div class="empty-icon">✦</div>
+            <div class="empty-title">Ready to assist</div>
+            <div class="empty-sub">Ask a question, upload a document, or start your career roadmap.</div>
+          </div>
+        </div>
+
+        <div id="tracker-panel">
+          <div class="tp-head">
+            <h4>Curriculum Progress</h4>
+            <div class="tp-stats">
+              <div class="tp-stat"><div class="tp-stat-n done" id="stat-done">0</div><div class="tp-stat-l">Done</div></div>
+              <div class="tp-stat"><div class="tp-stat-n fail" id="stat-fail">0</div><div class="tp-stat-l">Failed</div></div>
+              <div class="tp-stat"><div class="tp-stat-n pend" id="stat-pend">0</div><div class="tp-stat-l">Left</div></div>
+            </div>
+          </div>
+          <div id="tracker-grid"></div>
+        </div>
+
+        <div id="notif-panel">
+          <div class="np-head">
+            <h3>Notifications</h3>
+            <button id="close-notif" type="button">✕</button>
+          </div>
+          <div id="notif-list">
+            <div class="np-empty" id="np-empty">No notifications yet</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="input-zone">
+        <div id="file-badge">
+          <span>📎</span>
+          <span id="file-name"></span>
+          <button id="file-badge-clear" type="button">✕</button>
+        </div>
+        <div class="input-row">
+          <input type="file" id="file-input" accept=".pdf,.pptx" hidden>
+          <div id="attach-wrap">
+            <button id="attach-btn" type="button" title="Tools">⊕</button>
+            <div id="attach-menu">
+              <button class="am-item" data-action="upload" type="button">📎 Upload Document / Resume</button>
+              <button class="am-item" data-task="notes" type="button">📝 Exam Notes</button>
+              <button class="am-item" data-task="assignment" type="button">📋 Assignment</button>
+              <button class="am-item" data-task="research" type="button">🔬 Research Paper</button>
+              <button class="am-item" data-task="report" type="button">📊 Business Report</button>
+              <button class="am-item" data-task="explainer" type="button">💡 Concept Explainer</button>
+            </div>
+          </div>
+          <textarea id="user-input" rows="1" placeholder="Ask anything..."></textarea>
+          <button id="send-btn" type="button">➤</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── STATE ────────────────────────────────────────────────────
+let mode = null; // 'study' | 'career' | 'interview'
+let chats = {};
+let currentChat = null;
+let currentTask = 'notes';
+let isSending = false;
+let notifications = [];
+let attachedFile = null;
+
+const BACKEND = 'http://127.0.0.1:5000';
+const safeGet = k => { try { return sessionStorage.getItem(k); } catch(e) { return null; } };
+const safeSet = (k,v) => { try { sessionStorage.setItem(k,v); } catch(e) {} };
+const safeRm  = k => { try { sessionStorage.removeItem(k); } catch(e) {} };
+
+// ── ELEMENTS ─────────────────────────────────────────────────
+const gateway = document.getElementById('gateway');
+const app = document.getElementById('app');
+const sidebar = document.getElementById('sidebar');
+const chatListEl = document.getElementById('chat-list');
+const messagesWrap = document.getElementById('messages-wrap');
+const userInput = document.getElementById('user-input');
+const sendBtn = document.getElementById('send-btn');
+const fileInput = document.getElementById('file-input');
+const fileBadge = document.getElementById('file-badge');
+const fileName = document.getElementById('file-name');
+const attachMenu = document.getElementById('attach-menu');
+const trackerPanel = document.getElementById('tracker-panel');
+const trackerGrid = document.getElementById('tracker-grid');
+const notifPanel = document.getElementById('notif-panel');
+const notifList = document.getElementById('notif-list');
+const npEmpty = document.getElementById('np-empty');
+const notifDot = document.getElementById('notif-dot');
+const envBadge = document.getElementById('env-badge');
+const careerConfigBar = document.getElementById('career-config-bar');
+const interviewConfigBar = document.getElementById('interview-config-bar');
+const studyToolbar = document.getElementById('study-toolbar');
+const modeSelect = document.getElementById('mode-select');
+
+// ── GATEWAY RUNTIME ATTACHMENTS ───────────────────────────────
+document.getElementById('choose-study').onclick = () => activateMode('study');
+document.getElementById('choose-career').onclick = () => activateMode('career');
+document.getElementById('choose-interview').onclick = () => activateMode('interview');
+
+document.getElementById('cc-duration').onchange = () => { if(mode === 'career') renderDefaultTracker(); };
+document.getElementById('cc-role').onchange = () => { if(mode === 'career') sendProgressFetch(); };
+
+const saved = safeGet('isai-mode');
+if (['study', 'career', 'interview'].includes(saved)) {
+  activateMode(saved);
+}
+
+function activateMode(m) {
+  mode = m;
+  safeSet('isai-mode', m);
+  gateway.style.display = 'none';
+  app.classList.add('active');
+
+  // Reset display view blocks
+  careerConfigBar.classList.remove('visible');
+  interviewConfigBar.style.display = 'none';
+  studyToolbar.classList.remove('visible');
+  trackerPanel.classList.remove('visible');
+
+  if (m === 'study') {
+    envBadge.textContent = '📚 Study Mode';
+    envBadge.className = 'topbar-badge study';
+    studyToolbar.classList.add('visible');
+    userInput.placeholder = 'Ask anything academic, upload a PDF, or request notes...';
+    closeNotifPanel();
+  } else if (m === 'career') {
+    envBadge.textContent = '🚀 Career Mode';
+    envBadge.className = 'topbar-badge career';
+    careerConfigBar.classList.add('visible');
+    trackerPanel.classList.add('visible');
+    userInput.placeholder = "Type 'yes' to start your roadmap, or describe your progress...";
+    renderDefaultTracker();
+    sendProgressFetch();
+    checkDailyReminder();
+  } else if (m === 'interview') {
+    envBadge.textContent = '🎯 Interview Prep';
+    envBadge.className = 'topbar-badge interview';
+    interviewConfigBar.style.display = 'flex';
+    userInput.placeholder = "Type 'start' to begin your mock technical interview or 'done' to wrap up and get feedback...";
+    closeNotifPanel();
+  }
+
+  if (!currentChat) createChat();
+  renderSidebar();
+}
+
+document.getElementById('switch-btn').onclick = () => {
+  safeRm('isai-mode');
+  app.classList.remove('active');
+  gateway.style.display = 'flex';
+  mode = null;
+  resetSession();
+};
+
+// ── CHAT MANAGEMENT ───────────────────────────────────────────
+function createChat() {
+  if (currentChat && chats[currentChat] && chats[currentChat].messages.length === 0) return;
+  const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  chats[id] = { title: 'New Chat', messages: [], attachment: null };
+  currentChat = id;
+  renderMessages();
+  renderSidebar();
+}
+
+function selectChat(id) {
+  if(!chats[id]) return;
+  currentChat = id;
+  const a = chats[id].attachment;
+  if (a) { 
+    fileName.textContent = a.name; 
+    fileBadge.classList.add('visible'); 
+    attachedFile = a.file; 
+  } else { 
+    fileBadge.classList.remove('visible'); 
+    attachedFile = null; 
+  }
+  renderMessages();
+  renderSidebar();
+  if (mode === 'career') sendProgressFetch();
+}
+
+function deleteChat(id) {
+  if (Object.keys(chats).length <= 1) { addNotif('warning','Cannot delete','Last remaining session.'); return; }
+  if (!confirm('Delete this session?')) return;
+  delete chats[id];
+  if (currentChat === id) {
+    currentChat = Object.keys(chats).pop();
+  }
+  renderSidebar();
+  selectChat(currentChat);
+}
+
+function downloadChat(id) {
+  const c = chats[id];
+  if (!c || !c.messages.length) return;
+  let t = `InterviewSense AI — ${c.title}\n${'='.repeat(50)}\n\n`;
+  c.messages.forEach(m => {
+    if(m.content !== '__loading__') {
+      t += `[${m.role.toUpperCase()}]\n${m.content}\n\n${'-'.repeat(40)}\n`;
+    }
+  });
+  const blob = new Blob([t], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${c.title.replace(/[^a-z0-9]/gi,'_')}.txt`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function renderSidebar() {
+  chatListEl.innerHTML = '';
+  Object.keys(chats).reverse().forEach(id => {
+    const item = document.createElement('div');
+    item.className = `chat-item${id === currentChat ? ' active' : ''}`;
+    item.onclick = e => { if (!e.target.closest('.ci-btn')) selectChat(id); };
+
+    const title = document.createElement('div');
+    title.className = 'chat-title-el';
+    title.textContent = chats[id].title;
+
+    const actions = document.createElement('div');
+    actions.className = 'ci-actions';
+
+    const dl = document.createElement('button');
+    dl.className = 'ci-btn'; dl.textContent = '↓'; dl.title = 'Download Logs';
+    dl.onclick = e => { e.stopPropagation(); downloadChat(id); };
+
+    const del = document.createElement('button');
+    del.className = 'ci-btn'; del.textContent = '✕'; del.title = 'Remove';
+    del.onclick = e => { e.stopPropagation(); deleteChat(id); };
+
+    actions.append(dl, del);
+    item.append(title, actions);
+    chatListEl.appendChild(item);
+  });
+}
+
+// ── MESSAGES RUNTIME RENDERING ──────────────────────────────
+function renderMessages() {
+  const msgs = chats[currentChat]?.messages || [];
+  messagesWrap.innerHTML = '';
+
+  if (!msgs.length) {
+    messagesWrap.appendChild(buildEmptyState());
+    return;
+  }
+
+  msgs.forEach(m => {
+    const div = document.createElement('div');
+    div.className = `msg ${m.role}`;
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    if (m.content === '__loading__') {
+      bubble.innerHTML = `<div class="typing-dots"><span></span><span></span><span></span></div>`;
+    } else {
+      bubble.innerHTML = window.marked ? marked.parse(m.content || '') : (m.content || '').replace(/\n/g,'<br>');
+    }
+    div.appendChild(bubble);
+    messagesWrap.appendChild(div);
+  });
+  messagesWrap.scrollTop = messagesWrap.scrollHeight;
+}
+
+function buildEmptyState() {
+  const d = document.createElement('div');
+  d.className = 'empty-state';
+  let hints = [];
+  if (mode === 'career') {
+    hints = ['Type "yes" to start roadmap', 'Say "I completed day 1" to log progress', 'Type "done" after studying to take a quiz'];
+  } else if (mode === 'interview') {
+    hints = ['Type "start" to spin up interview panels', 'Upload your resume to align skills', 'Type "done" when finished to render score feedback'];
+  } else {
+    hints = ['Upload a PDF to extract topics', 'Ask for 10-mark notes on any subject', 'Request an assignment or research paper'];
+  }
+  d.innerHTML = `<div class="empty-icon">✦</div><div class="empty-title">Ready to assist</div><div class="empty-sub">${hints.map(h=>`• ${h}`).join('<br>')}</div>`;
+  return d;
+}
+
+function addMessage(role, content) {
+  if (!chats[currentChat]) return;
+  chats[currentChat].messages.push({ role, content });
+  renderMessages();
+}
+
+// ── CENTRAL SEND PIPELINE ────────────────────────────────────
+async function send() {
+  if (isSending) return;
+  const text = userInput.value.trim();
+  if (!text && !attachedFile && mode !== 'career' && mode !== 'interview') return;
+  if ((mode === 'career' || mode === 'interview') && !text && !attachedFile) return;
+
+  isSending = true;
+  sendBtn.disabled = true;
+
+  const snap = currentChat;
+  const snapMode = mode;
+  const file = attachedFile; // Real-time instance snapshot tracking
+
+  if (chats[snap].title === 'New Chat' && text) {
+    chats[snap].title = text.slice(0, 24) + (text.length > 24 ? '…' : '');
+    renderSidebar();
+  }
+
+  addMessage('user', text || '📎 File reference uploaded');
+  userInput.value = '';
+  autoResize();
+  addMessage('assistant', '__loading__');
+
+  let config = null;
+  if (snapMode === 'career') {
+    config = {
+      role: document.getElementById('cc-role').value.trim() || 'Python Developer',
+      duration: document.getElementById('cc-duration').value,
+      hours_per_day: document.getElementById('cc-hours').value,
+      level: document.getElementById('cc-level').value,
+      dsa_track: document.getElementById('cc-dsa').value,
+    };
+  } else if (snapMode === 'interview') {
+    config = {
+      company: document.getElementById('ic-company').value.trim() || 'Google',
+      role: document.getElementById('ic-role').value.trim() || 'AI/ML Engineer',
+      jd_snippet: document.getElementById('ic-jd').value.trim() || 'Core execution vectors',
+      round_type: document.getElementById('ic-round').value,
+      ratio_rule: "5:1" // Config metric indicating backend cross-checking rules
+    };
+  }
+
+  try {
+    const data = await callBackend(text, modeSelect.value, snapMode === 'study' ? currentTask : snapMode, chats[snap].messages.filter(m => m.content !== '__loading__'), file, snapMode, config, snap);
+    const msgs = chats[snap].messages;
+    if (msgs.length && msgs[msgs.length-1].content === '__loading__') msgs.pop();
+
+    const responseText = data.text || data.answer || 'No valid tracking response parsed from endpoints.';
+    msgs.push({ role: 'assistant', content: '' });
+    const idx = msgs.length - 1;
+
+    // Optimized Simulated Streaming Architecture
+    let current = '';
+    const words = responseText.split(/(\s+)/);
+    for (const token of words) {
+      if (currentChat !== snap) break;
+      current += token;
+      msgs[idx].content = current;
+      
+      const bubbles = messagesWrap.querySelectorAll('.msg.assistant .bubble');
+      if (bubbles.length > 0) {
+        bubbles[bubbles.length - 1].innerHTML = window.marked ? marked.parse(current) : current.replace(/\n/g,'<br>');
+      }
+      messagesWrap.scrollTop = messagesWrap.scrollHeight;
+      await delay(12);
+    }
+
+    if (data.tracker && Array.isArray(data.tracker) && snapMode === 'career') {
+      renderTracker(data.tracker);
+    }
+
+    if (snapMode === 'career' && responseText.toUpperCase().includes('PASS')) {
+      addNotif('success', 'Day completed! 🎉', "You passed today's evaluation framework metrics.");
+    } else if (snapMode === 'career' && responseText.toUpperCase().includes('FAIL')) {
+      addNotif('warning', 'Assessment failed', 'Review the technical content layers and repeat execution modules.');
+    }
+
+  } catch(e) {
+    const msgs = chats[snap].messages;
+    if (msgs.length && msgs[msgs.length-1].content === '__loading__') msgs.pop();
+    addMessage('assistant', `⚠️ Execution Interruption Error: ${e.message}`);
+  } finally {
+    isSending = false;
+    sendBtn.disabled = false;
+  }
+}
+
+async function callBackend(text, mode2, task, history, file, aType, config, chatId) {
+  const form = new FormData();
+  form.append('topic', text);
+  form.append('mode', mode2);
+  form.append('task_type', task);
+  form.append('assistant_type', aType);
+  form.append('chat_id', chatId);
+  form.append('history', JSON.stringify(history));
+  if (config) form.append('career_config', JSON.stringify(config));
+  
+  if (file && file instanceof File) {
+    form.append('file', file);
+  }
+
+  let url = `${BACKEND}/api/workspace/generate`;
+  if (aType === 'career') url = `${BACKEND}/api/edtech/generate`;
+  if (aType === 'interview') url = `${BACKEND}/api/interview/generate`;
+
+  const res = await fetch(url, { method: 'POST', body: form });
+  if (!res.ok) throw new Error(`HTTP Endpoint reported error status: ${res.status}`);
+  return res.json();
+}
+
+const delay = ms => new Promise(r => setTimeout(r, ms));
+
+// ── PROGRESS SYNC RUNTIMES ────────────────────────────────────
+async function sendProgressFetch() {
+  if (!currentChat) return;
+  const form = new FormData();
+  form.append('topic', 'refresh_fetch');
+  form.append('mode', '10 Marks');
+  form.append('task_type', 'career');
+  form.append('assistant_type', 'career');
+  form.append('chat_id', currentChat);
+  form.append('history', JSON.stringify([]));
+  form.append('career_config', JSON.stringify({
+    role: document.getElementById('cc-role').value.trim() || 'Python Developer',
+    duration: document.getElementById('cc-duration').value,
+    hours_per_day: document.getElementById('cc-hours').value,
+    level: document.getElementById('cc-level').value,
+    dsa_track: document.getElementById('cc-dsa').value,
+  }));
+  try {
+    const res = await fetch(`${BACKEND}/api/edtech/generate`, { method: 'POST', body: form });
+    const data = await res.json();
+    if (!data.text) { renderDefaultTracker(); return; }
+    if (data.tracker) renderTracker(data.tracker);
+    const introText = data.text || data.answer || '';
+    const msgs = chats[currentChat]?.messages || [];
+    if (introText && !msgs.some(m => m.content.includes('Roadmap'))) {
+      chats[currentChat].messages = [];
+      chats[currentChat].messages.push({ role: 'assistant', content: introText });
+      renderMessages();
+    }
+  } catch(e) { renderDefaultTracker(); }
+}
+
+function resetSession() {
+  if (currentChat) {
+    const form = new FormData();
+    form.append('chat_id', currentChat);
+    fetch(`${BACKEND}/api/edtech/reset`, { method: 'POST', body: form }).catch(() => {});
+  }
+  chats = {};
+  currentChat = null;
+}
+
+// ── TRACKER PANEL MANAGEMENT ───────────────────────────────────
+function renderDefaultTracker() {
+  const total = parseInt(document.getElementById('cc-duration').value) || 30;
+  const tracker = Array.from({ length: total }, (_, i) => ({ day: i+1, status: 'pending' }));
+  renderTracker(tracker);
+}
+
+function renderTracker(tracker) {
+  trackerGrid.innerHTML = '';
+  let done=0, fail=0, pend=0;
+  tracker.forEach(d => {
+    const box = document.createElement('div');
+    box.className = `day-box ${d.status || 'pending'}`;
+    box.textContent = `D${d.day}`;
+    box.title = `Day ${d.day} — ${d.status || 'pending'}`;
+    box.onclick = () => {
+      if (d.status === 'pending') addNotif('reminder', `Day ${d.day} Locked`, 'Complete current milestone vectors first.');
+      else if (d.status === 'completed') addNotif('success', `Day ${d.day} Cleared`, 'Module evaluation logs verify clean execution.');
+    };
+    trackerGrid.appendChild(box);
+    if (d.status === 'completed') done++;
+    else if (d.status === 'failed') fail++;
+    else pend++;
+  });
+  document.getElementById('stat-done').textContent = done;
+  document.getElementById('stat-fail').textContent = fail;
+  document.getElementById('stat-pend').textContent = pend;
+}
+
+// ── NOTIFICATIONS SYSTEM ─────────────────────────────────────
+function addNotif(type, title, body) {
+  const now = new Date();
+  const time = now.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+  notifications.unshift({ type, title, body, time });
+  notifDot.classList.add('active');
+  renderNotifs();
+}
+
+function renderNotifs() {
+  if (!notifications.length) { npEmpty.style.display = 'block'; return; }
+  npEmpty.style.display = 'none';
+  notifList.innerHTML = '';
+  notifications.forEach(n => {
+    const item = document.createElement('div');
+    item.className = `notif-item ${n.type}`;
+    item.innerHTML = `<div class="ni-title">${n.title}</div><div class="ni-body">${n.body}</div><div class="ni-time">${n.time}</div>`;
+    notifList.appendChild(item);
+  });
+}
+
+function checkDailyReminder() {
+  const last = safeGet('isai-last-study');
+  const today = new Date().toDateString();
+  if (last !== today) {
+    addNotif('reminder', '📅 Curriculum Active', 'Provide updates on current curriculum task items to prevent streak loss.');
+    safeSet('isai-last-study', today);
+  }
+}
+
+document.getElementById('notif-btn').onclick = () => {
+  if (notifPanel.classList.contains('open')) closeNotifPanel();
+  else { notifPanel.classList.add('open'); notifDot.classList.remove('active'); renderNotifs(); }
+};
+document.getElementById('close-notif').onclick = closeNotifPanel;
+function closeNotifPanel() { notifPanel.classList.remove('open'); }
+
+// ── UI BLOCK ACTIONS & INTERFACES ─────────────────────────────
+document.getElementById('sidebar-toggle').onclick = () => sidebar.classList.toggle('collapsed');
+
+document.getElementById('new-chat-btn').onclick = () => {
+  createChat();
+  if (mode === 'career') sendProgressFetch();
+};
+
+sendBtn.onclick = send;
+userInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+userInput.addEventListener('input', autoResize);
+
+function autoResize() {
+  userInput.style.height = 'auto';
+  userInput.style.height = Math.min(userInput.scrollHeight, 140) + 'px';
+}
+
+// Attach Sub-Menu Triggers
+document.getElementById('attach-btn').onclick = e => { e.stopPropagation(); attachMenu.classList.toggle('open'); };
+document.addEventListener('click', () => attachMenu.classList.remove('open'));
+
+document.querySelectorAll('.am-item').forEach(item => {
+  item.onclick = () => {
+    const action = item.dataset.action;
+    const task = item.dataset.task;
+    if (action === 'upload') fileInput.click();
+    if (task) setTask(task);
+    attachMenu.classList.remove('open');
+  };
+});
+
+fileInput.onchange = e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  attachedFile = f;
+  if (chats[currentChat]) chats[currentChat].attachment = { file: f, name: f.name };
+  fileName.textContent = f.name;
+  fileBadge.classList.add('visible');
+};
+
+document.getElementById('file-badge-clear').onclick = () => {
+  attachedFile = null;
+  fileInput.value = '';
+  fileBadge.classList.remove('visible');
+  if (chats[currentChat]) chats[currentChat].attachment = null;
+};
+
+// Task Filter Pills
+document.querySelectorAll('.task-pill').forEach(pill => {
+  pill.onclick = () => setTask(pill.dataset.task);
+});
+
+function setTask(task) {
+  currentTask = task;
+  document.querySelectorAll('.task-pill').forEach(p => {
+    p.classList.toggle('active', p.dataset.task === task);
+  });
+  modeSelect.style.display = (task === 'notes') ? 'block' : 'none';
+}
+</script>
+</body>
+</html>

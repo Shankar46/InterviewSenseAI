@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Direct Career Test</title>
+</head>
+<body>
+    <h1>Direct Career Test</h1>
+    <button onclick="testCareer()">Test Career Generation</button>
+    <pre id="output"></pre>
+
+    <script>
+    const CONFIG = {
+        BACKEND_URL: "http://127.0.0.1:5000",
+        ENDPOINTS: { CAREER: "/api/edtech/generate" }
+    };
+
+    async function testCareer() {
+        const output = document.getElementById("output");
+        output.textContent = "Starting test...\n";
+
+        const form = new FormData();
+        form.append("topic", "yes");
+        form.append("mode", "10 Marks");
+        form.append("task_type", "career");
+        form.append("assistant_type", "career");
+        form.append("chat_id", "test-" + Date.now());
+        form.append("history", JSON.stringify([]));
+        form.append("career_config", JSON.stringify({
+            role: "Python Developer",
+            duration: "30",
+            hours_per_day: "2",
+            level: "beginner",
+            dsa_track: "yes"
+        }));
+
+        const start = Date.now();
+        try {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 120000);
+            
+            const res = await fetch(CONFIG.BACKEND_URL + CONFIG.ENDPOINTS.CAREER, {
+                method: "POST",
+                body: form,
+                signal: controller.signal
+            });
+            clearTimeout(timeout);
+
+            const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+            output.textContent += `\n✓ Response in ${elapsed}s\n`;
+            output.textContent += `Status: ${res.status}\n`;
+
+            if (!res.ok) {
+                output.textContent += `Error: ${res.statusText}\n`;
+                const err = await res.json();
+                output.textContent += JSON.stringify(err, null, 2);
+                return;
+            }
+
+            const data = await res.json();
+            output.textContent += `\nResponse keys: ${Object.keys(data)}\n`;
+            output.textContent += `Text length: ${data.text?.length || 0}\n`;
+            output.textContent += `Tracker length: ${data.tracker?.length || 0}\n`;
+            output.textContent += `\n--- TEXT ---\n${data.text || '(empty)'}\n`;
+            output.textContent += `\n--- TRACKER ---\n${JSON.stringify(data.tracker, null, 2)}\n`;
+
+        } catch (err) {
+            output.textContent += `\n❌ Error: ${err.message}\n`;
+        }
+    }
+    </script>
+</body>
+</html>

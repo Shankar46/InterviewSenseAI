@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>Career Accelerator Debug Test</title>
+  <style>
+    body { font-family: Arial; padding: 20px; background: #f5f5f5; }
+    .container { max-width: 900px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
+    h1 { color: #333; }
+    .test-section { margin: 20px 0; padding: 15px; background: #f9f9f9; border-left: 4px solid #007bff; }
+    .log { background: #000; color: #0f0; padding: 10px; border-radius: 4px; max-height: 300px; overflow-y: auto; font-family: monospace; font-size: 12px; }
+    button { padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin: 5px; }
+    button:hover { background: #0056b3; }
+    .status { padding: 10px; margin: 10px 0; border-radius: 4px; }
+    .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+    .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    .warning { background: #fff3cd; color: #856404; border: 1px solid #ffeaa7; }
+    textarea { width: 100%; height: 150px; font-family: monospace; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h1>🧪 Career Accelerator Debug Test</h1>
+  
+  <div class="test-section">
+    <h2>1. Check Backend Connection</h2>
+    <button onclick="testHealthCheck()">Test Backend Health</button>
+    <div id="health-status" class="status" style="display:none;"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>2. Check Career Config Elements</h2>
+    <button onclick="testCareerElements()">Check HTML Elements</button>
+    <div id="elements-status" class="status" style="display:none;"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>3. Simulate Career Request (Yes)</h2>
+    <button onclick="testCareerRequest()">Send 'Yes' to Backend</button>
+    <div id="career-status" class="status" style="display:none;"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>4. Test Message Rendering</h2>
+    <button onclick="testMessageRender()">Render Sample Message</button>
+    <div id="render-status" class="status" style="display:none;"></div>
+    <div id="render-preview" style="border: 1px solid #ddd; padding: 10px; margin-top: 10px; background: #fafafa;">
+      Sample output will appear here
+    </div>
+  </div>
+
+  <div class="test-section">
+    <h2>5. Debug Console Output</h2>
+    <div class="log" id="debug-log">Console output will appear here...</div>
+  </div>
+
+</div>
+
+<script>
+  const debugLog = document.getElementById('debug-log');
+  
+  function log(msg, type = 'info') {
+    const timestamp = new Date().toLocaleTimeString();
+    const color = type === 'error' ? '#ff6b6b' : type === 'success' ? '#51cf66' : '#ffd43b';
+    const logEntry = `[${timestamp}] ${msg}`;
+    debugLog.innerHTML += `<span style="color:${color}">${logEntry}</span>\n`;
+    debugLog.scrollTop = debugLog.scrollHeight;
+    console.log(logEntry);
+  }
+
+  async function testHealthCheck() {
+    log('Testing backend health...', 'info');
+    try {
+      const res = await fetch('http://127.0.0.1:5000/api/health', { timeout: 10000 });
+      if (res.ok) {
+        const data = await res.json();
+        log(`✓ Backend running: ${data.service}`, 'success');
+        showStatus('health-status', `✓ Backend is running correctly: ${data.service}`, 'success');
+      } else {
+        log(`✗ Backend error: ${res.status}`, 'error');
+        showStatus('health-status', `✗ Backend returned: ${res.status}`, 'error');
+      }
+    } catch (err) {
+      log(`✗ Cannot connect to backend: ${err.message}`, 'error');
+      showStatus('health-status', `✗ Cannot connect to backend at 127.0.0.1:5000`, 'error');
+    }
+  }
+
+  function testCareerElements() {
+    log('Checking HTML elements...', 'info');
+    const elements = {
+      'cc-role': document.getElementById('cc-role'),
+      'cc-duration': document.getElementById('cc-duration'),
+      'cc-hours': document.getElementById('cc-hours'),
+      'cc-level': document.getElementById('cc-level'),
+      'cc-dsa': document.getElementById('cc-dsa'),
+      'messages-wrap': document.getElementById('messages-wrap'),
+      'chat-input': document.getElementById('chat-input'),
+      'user-input': document.getElementById('user-input'),
+    };
+
+    let missing = [];
+    let found = [];
+
+    for (const [name, elem] of Object.entries(elements)) {
+      if (elem) {
+        found.push(name);
+        log(`✓ Found element: #${name}`, 'success');
+      } else {
+        missing.push(name);
+        log(`✗ Missing element: #${name}`, 'error');
+      }
+    }
+
+    const status = missing.length === 0 
+      ? `✓ All ${found.length} elements found` 
+      : `✗ Missing ${missing.length}: ${missing.join(', ')}`;
+    
+    showStatus('elements-status', status, missing.length === 0 ? 'success' : 'error');
+  }
+
+  async function testCareerRequest() {
+    log('Sending career request with topic="yes"...', 'info');
+    
+    try {
+      const form = new FormData();
+      form.append('topic', 'yes');
+      form.append('mode', '10 Marks');
+      form.append('task_type', 'career');
+      form.append('assistant_type', 'career');
+      form.append('chat_id', 'debug-test-' + Date.now());
+      form.append('history', JSON.stringify([]));
+      form.append('career_config', JSON.stringify({
+        role: 'Python Developer',
+        duration: '30 days',
+        hours_per_day: '2',
+        level: 'beginner',
+        dsa_track: 'yes'
+      }));
+
+      log('Request payload prepared, sending to /api/edtech/generate...', 'info');
+      
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 120000); // 2 minutes
+      
+      const res = await fetch('http://127.0.0.1:5000/api/edtech/generate', {
+        method: 'POST',
+        body: form,
+        signal: controller.signal
+      });
+
+      clearTimeout(timeout);
+
+      log(`Response received: ${res.status}`, res.ok ? 'success' : 'error');
+
+      if (res.ok) {
+        const data = await res.json();
+        log(`✓ Response structure:`, 'success');
+        log(`  - text length: ${data.text ? data.text.length : 0} chars`, 'success');
+        log(`  - text preview: ${data.text ? data.text.substring(0, 100) : 'EMPTY'}...`, 'success');
+        log(`  - has tracker: ${!!data.tracker}`, 'success');
+        log(`  - tracker items: ${data.tracker ? data.tracker.length : 0}`, 'success');
+
+        showStatus('career-status', 
+          `✓ Backend working!\n\nText: ${data.text.length} chars\nTracker: ${data.tracker.length} days\n\nResponse: ${JSON.stringify(data, null, 2)}`,
+          'success'
+        );
+      } else {
+        const errText = await res.text();
+        log(`✗ Backend error: ${errText.substring(0, 200)}`, 'error');
+        showStatus('career-status', `✗ Backend error ${res.status}`, 'error');
+      }
+    } catch (err) {
+      log(`✗ Request failed: ${err.message}`, 'error');
+      showStatus('career-status', `✗ Request failed: ${err.message}`, 'error');
+    }
+  }
+
+  function testMessageRender() {
+    log('Testing message rendering...', 'info');
+    
+    const wrapper = document.getElementById('render-preview');
+    wrapper.innerHTML = '';
+
+    // Test 1: Simple text
+    const msg1 = document.createElement('div');
+    msg1.className = 'msg assistant';
+    msg1.innerHTML = `
+      <div class="bubble">
+        <h2>Test Roadmap</h2>
+        <p>This is a test message to verify rendering works correctly.</p>
+      </div>
+    `;
+    wrapper.appendChild(msg1);
+    log('✓ Simple message rendered', 'success');
+
+    // Test 2: Check if CSS classes exist
+    const styles = document.createElement('style');
+    styles.innerHTML = `
+      .msg { padding: 10px; margin: 5px 0; }
+      .msg.assistant { background: #e8f4f8; }
+      .bubble { padding: 10px; border-radius: 8px; }
+    `;
+    if (!document.querySelector('style')) {
+      document.head.appendChild(styles);
+      log('✓ CSS styles injected', 'success');
+    }
+
+    // Re-render with styles
+    wrapper.innerHTML = msg1.outerHTML;
+    log('✓ Message rendering works', 'success');
+    showStatus('render-status', '✓ Message rendering test passed', 'success');
+  }
+
+  function showStatus(elementId, message, type) {
+    const elem = document.getElementById(elementId);
+    elem.className = `status ${type}`;
+    elem.innerHTML = `<pre>${message}</pre>`;
+    elem.style.display = 'block';
+  }
+
+  // Initial log
+  log('Debug test page loaded. Click buttons to test components.', 'info');
+  log('If Backend is at different URL, update testHealthCheck() function.', 'warning');
+
+</script>
+
+</body>
+</html>
