@@ -1,8 +1,8 @@
-// frontend/scripts/config.js
 // Central configuration — edit BACKEND_URL to point at your Flask server.
 
 const CONFIG = Object.freeze({
-  BACKEND_URL: "http://127.0.0.1:5000",
+  // Leave empty so it automatically routes to your live Vercel domain
+  BACKEND_URL: "", 
 
   ENDPOINTS: {
     STUDY:         "/api/workspace/generate",
@@ -16,6 +16,6 @@ const CONFIG = Object.freeze({
   },
 
   MAX_HISTORY_TURNS: 8,
-  STREAM_DELAY_MS:   30,  // milliseconds between stream updates (was 0.8 - too fast)
+  STREAM_DELAY_MS:   30,  
   STORAGE_KEY:       "isai-workspace",
 });
