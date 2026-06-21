@@ -5,3 +5,7 @@ PyPDF2
 python-dotenv
 python-pptx
 python-docx
+
+fastapi
+uvicorn
+pydantic
