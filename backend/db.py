@@ -4,7 +4,10 @@ import logging
 import sqlite3
 from contextlib import contextmanager
 
-DB_NAME = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "interviewsense.db")
+if os.environ.get("VERCEL"):
+    DB_NAME = "/tmp/interviewsense.db"
+else:
+    DB_NAME = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "interviewsense.db")
 logger = logging.getLogger(__name__)
 
 
