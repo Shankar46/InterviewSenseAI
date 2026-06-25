@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>InterviewSense AI</title>
+  <meta name="description" content="InterviewSense AI — Build career roadmaps, ace technical interviews, and produce professional-grade academic work in one intelligent platform.">
+  <title>InterviewSense AI — Adaptive Intelligence Suite</title>
 
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -32,7 +33,7 @@
     <div class="portal-grid">
       <button class="portal-card study" id="choose-study" type="button">
         <div class="card-badge">ST</div>
-        <h3>Study & Research</h3>
+        <h3>Study &amp; Research</h3>
         <p>Upload documents, generate exam notes, assignments, research papers, and professional reports.</p>
         <div class="card-arrow">Enter Workspace →</div>
       </button>
@@ -41,6 +42,12 @@
         <h3>Career Accelerator</h3>
         <p>Build adaptive learning roadmaps, track daily progress, and run simulated technical mock interviews.</p>
         <div class="card-arrow">Launch Suite →</div>
+      </button>
+      <button class="portal-card interview" id="choose-interview" type="button">
+        <div class="card-badge">IV</div>
+        <h3>Interview Assistant</h3>
+        <p>Paste your JD and resume, pick a company — get tailored interview questions with instant AI feedback.</p>
+        <div class="card-arrow">Start Interview →</div>
       </button>
     </div>
   </div>
@@ -58,6 +65,8 @@
     <span class="env-badge study" id="env-badge">📚 Study Mode</span>
 
     <div class="topbar-actions">
+      <button class="tb-btn" id="ide-toggle-btn" style="display:none" title="Toggle Code Editor">💻 Editor</button>
+      <button class="tb-btn" id="weekly-interview-btn" style="display:none;" title="Mandatory weekly mock interview. Complete this mock interview to mark the last 2 days of this week as completed.">🎯 Weekly Mock Interview</button>
       <button class="notif-btn" id="notif-btn" title="Notifications">
         🔔
         <div class="notif-dot" id="notif-dot"></div>
@@ -80,6 +89,84 @@
 
     <!-- CONTENT -->
     <div class="content-area">
+
+      <!-- INTERVIEW CONFIG BAR -->
+      <div id="interview-config-bar">
+        <!-- Collapsed summary row (shown after interview starts) -->
+        <div class="ic-collapsed-row">
+          <span class="ic-session-icon">🎯</span>
+          <span class="ic-session-label" id="ic-session-label">New Interview Session</span>
+          <button class="ic-expand-btn" id="ic-expand-btn" type="button" title="Edit setup">✏️ Edit</button>
+        </div>
+        <!-- Progress bar (shown during interview) -->
+        <div id="interview-progress">
+          <div class="ip-track">
+            <div class="ip-fill" id="ip-fill"></div>
+          </div>
+          <span class="ip-label" id="ip-label">Q1 / 10</span>
+          <span class="ip-score" id="ip-score"></span>
+        </div>
+        <!-- Expandable setup form -->
+        <div class="ic-expandable">
+          <div class="ic-row">
+            <div class="ic-field">
+              <label class="ic-label" for="ic-role">Target Role</label>
+              <input type="text" class="ic-input" id="ic-role" placeholder="e.g. Senior Backend Engineer" autocomplete="off">
+            </div>
+            <div class="ic-field">
+              <label class="ic-label" for="ic-company">Company</label>
+              <input type="text" class="ic-input" id="ic-company" placeholder="e.g. Google" autocomplete="off">
+            </div>
+          </div>
+          <div class="ic-row">
+            <div class="ic-field">
+              <label class="ic-label" for="ic-domain">Interview Domain</label>
+              <select class="ic-input" id="ic-domain">
+                <option value="it">IT / Technical (e.g. Software, ML Engineer)</option>
+                <option value="non-it">Non-IT (e.g. Business Analyst, Consulting)</option>
+              </select>
+            </div>
+            <div class="ic-field">
+              <label class="ic-label" for="ic-round">Round Type</label>
+              <select class="ic-input" id="ic-round">
+                <option value="tech">Technical / Functional Round</option>
+                <option value="hr">HR / Managerial Round</option>
+              </select>
+            </div>
+          </div>
+          <div class="ic-row ic-row-full">
+            <div class="ic-field ic-field-full">
+              <label class="ic-label" for="ic-jd">Job Description <span class="ic-opt">(paste or leave blank)</span></label>
+              <textarea class="ic-textarea" id="ic-jd" rows="3" placeholder="Paste the job description here — the more detail, the better the questions…"></textarea>
+            </div>
+          </div>
+          <div class="ic-row ic-row-full">
+            <div class="ic-field ic-field-full">
+              <label class="ic-label" for="ic-resume">Your Resume / Profile <span class="ic-opt">(PDF or DOCX)</span></label>
+              <div class="ic-upload-zone" id="ic-upload-zone">
+                <input type="file" id="ic-resume-file" accept=".pdf,.docx,.doc,.txt" hidden>
+                <div class="ic-upload-prompt" id="ic-upload-prompt">
+                  <span class="ic-upload-icon">📄</span>
+                  <div class="ic-upload-text">
+                    <span class="ic-upload-title">Drop your resume here</span>
+                    <span class="ic-upload-sub">or <button type="button" class="ic-browse-btn" id="ic-browse-btn">browse files</button> — PDF, DOCX, TXT</span>
+                  </div>
+                </div>
+                <div class="ic-file-selected" id="ic-file-selected" style="display:none">
+                  <span class="ic-file-icon">✅</span>
+                  <span class="ic-file-name" id="ic-file-name"></span>
+                  <button type="button" class="ic-file-clear" id="ic-file-clear" title="Remove file">✕</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="ic-actions">
+            <button class="ic-start-btn" id="ic-start-btn" type="button">🎯 Start Mock Interview</button>
+            <button class="ic-minimize-btn" id="ic-minimize-btn" type="button">➖ Minimize</button>
+            <button class="ic-reset-btn" id="ic-reset-btn" type="button">↺ Reset</button>
+          </div>
+        </div>
+      </div>
 
       <!-- CAREER CONFIG BAR -->
       <div id="career-config-bar">
@@ -135,6 +222,28 @@
       <div id="chat-view">
         <div id="messages-wrap"></div>
 
+        <!-- IDE PANEL -->
+        <div id="ide-panel" style="display:none">
+          <div class="ide-head">
+            <span>💻 Code Editor</span>
+            <div class="ide-actions">
+              <select id="ide-lang" class="ide-select">
+                <option value="python">Python</option>
+                <option value="javascript">JavaScript</option>
+              </select>
+              <button id="ide-run-btn" class="ide-btn run">Run Code</button>
+              <button id="ide-copy-to-chat" class="ide-btn">Copy to Chat</button>
+            </div>
+          </div>
+          <div class="ide-editor-container">
+            <textarea id="ide-code" spellcheck="false" placeholder="# Write your solution here..."></textarea>
+          </div>
+          <div class="ide-output-panel">
+            <div class="ide-output-head">Console Output</div>
+            <pre id="ide-console-output">No code executed yet.</pre>
+          </div>
+        </div>
+
         <!-- TRACKER PANEL -->
         <div id="tracker-panel">
           <div class="tp-head">
@@ -171,7 +280,7 @@
         </div>
       </div>
 
-      <!-- INPUT ZONE -->
+      <!-- INPUT ZONE (Study & Career) -->
       <div class="input-zone">
         <!-- File preview badge -->
         <div id="file-badge">
@@ -198,10 +307,18 @@
           </div>
 
           <!-- Message input -->
-          <textarea id="user-input" rows="1" placeholder="Ask anything…"></textarea>
+          <textarea id="user-input" rows="1" placeholder="Ask anything academic, upload a PDF, or request notes…"></textarea>
 
           <!-- Send -->
           <button class="send-btn" id="send-btn" type="button" title="Send">➤</button>
+        </div>
+      </div>
+
+      <!-- INTERVIEW INPUT ZONE -->
+      <div class="input-zone interview-input-zone" id="interview-input-zone" style="display:none">
+        <div class="input-row">
+          <textarea class="iw-answer-input" id="iw-answer-input" rows="2" placeholder="Type your interview answer here… be specific and use real examples."></textarea>
+          <button class="send-btn iw-send-btn" id="iw-send-btn" type="button" title="Submit answer">➤</button>
         </div>
       </div>
 
@@ -209,13 +326,27 @@
   </div><!-- /main-layout -->
 </div><!-- /app -->
 
+<!-- Fullscreen Lock Overlay -->
+<div id="fullscreen-lock-overlay" style="display: none;">
+  <div class="fs-lock-content">
+    <div class="fs-lock-icon">🔒</div>
+    <h2>Fullscreen Required</h2>
+    <p>Mock interviews are conducted in fullscreen mode to simulate a genuine, focused interview environment.</p>
+    <button class="fs-btn" id="fs-resume-btn">Resume Fullscreen</button>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
 <!-- ── Scripts (order matters) ───────────────────────────── -->
-<script src="scripts/config.js?v=20260605-2"></script>
-<script src="scripts/store.js?v=20260605-2"></script>
-<script src="scripts/api.js?v=20260605-2"></script>
-<script src="scripts/ui.js?v=20260605-2"></script>
-<script src="scripts/chat.js?v=20260605-2"></script>
-<script src="scripts/app.js?v=20260605-2"></script>
+<script src="scripts/config.js?v=20260625"></script>
+<script src="scripts/store.js?v=20260625"></script>
+<script src="scripts/api.js?v=20260625"></script>
+<script src="scripts/ui.js?v=20260625"></script>
+<script src="scripts/chat.js?v=20260625"></script>
+<script src="scripts/interview.js?v=20260625"></script>
+<script src="scripts/app.js?v=20260625"></script>
 
 </body>
 </html>

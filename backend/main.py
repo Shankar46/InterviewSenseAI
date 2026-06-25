@@ -23,6 +23,12 @@ from backend.db import (
     reset_awaiting_answers,
 )
 from backend.generator import generate_notes
+from backend.interview_assistant import (
+    get_report      as get_interview_report,
+    reset_interview_session,
+    start_interview,
+    submit_answer,
+)
 from backend.utils import extract_text, split_into_topic_blocks
 
 load_dotenv()
@@ -268,6 +274,144 @@ def mark_read_endpoint():
 @app.route("/api/health", methods=["GET"])
 def health_endpoint():
     return jsonify({"status": "ok", "service": "InterviewSense AI"})
+
+
+# ── Interview routes ─────────────────────────────────────────
+
+@app.route("/api/interview/start", methods=["POST"])
+def interview_start_endpoint():
+    """Initialise a mock interview session and return the first question."""
+    try:
+        chat_id     = request.form.get("chat_id", "default").strip() or "default"
+        role        = request.form.get("role", "Software Engineer").strip()
+        company     = request.form.get("company", "the company").strip()
+        jd_text     = request.form.get("jd_text", "").strip()
+        resume_text = request.form.get("resume_text", "").strip()
+        domain      = request.form.get("domain", "it").strip()
+        round_type  = request.form.get("round_type", "tech").strip()
+        weekly_career_day = int(request.form.get("weekly_career_day", "0").strip() or "0")
+
+        # Support file uploads for JD / resume
+        jd_file     = request.files.get("jd_file")
+        resume_file = request.files.get("resume_file")
+        if jd_file and jd_file.filename:
+            jd_text     = extract_text(jd_file)[:4000] or jd_text
+        if resume_file and resume_file.filename:
+            resume_text = extract_text(resume_file)[:3000] or resume_text
+
+        result = start_interview(chat_id, role, company, jd_text, resume_text, domain, round_type, weekly_career_day)
+        return jsonify(result)
+    except Exception:
+        logger.exception("Interview start failed.")
+        return jsonify({"status": "error", "message": "Failed to start interview. Please try again."}), 500
+
+
+@app.route("/api/interview/answer", methods=["POST"])
+def interview_answer_endpoint():
+    """Evaluate a candidate's answer and return feedback + next question or report."""
+    try:
+        chat_id = request.form.get("chat_id", "default").strip() or "default"
+        answer  = request.form.get("answer", "").strip()
+        result  = submit_answer(chat_id, answer)
+        return jsonify(result)
+    except Exception:
+        logger.exception("Interview answer evaluation failed.")
+        return jsonify({"status": "error", "message": "Evaluation failed. Please try again."}), 500
+
+
+@app.route("/api/interview/report", methods=["GET"])
+def interview_report_endpoint():
+    """Return the final interview report card."""
+    try:
+        chat_id = request.args.get("chat_id", "default").strip() or "default"
+        result  = get_interview_report(chat_id)
+        return jsonify(result)
+    except Exception:
+        logger.exception("Interview report fetch failed.")
+        return jsonify({"status": "error", "message": "Report unavailable."}), 500
+
+
+@app.route("/api/interview/reset", methods=["POST"])
+def interview_reset_endpoint():
+    """Wipe the interview session so the user can start fresh."""
+    try:
+        chat_id = request.form.get("chat_id", "").strip()
+        if chat_id:
+            reset_interview_session(chat_id)
+        return jsonify({"status": "ok"})
+    except Exception:
+        logger.exception("Interview reset failed.")
+        return jsonify({"status": "error"}), 500
+
+
+@app.route("/api/ide/run", methods=["POST"])
+def ide_run_endpoint():
+    """Execute python or javascript code safely using local runtimes."""
+    import subprocess
+    import tempfile
+    try:
+        language = request.form.get("language", "python").strip().lower()
+        code     = request.form.get("code", "").strip()
+
+        if not code:
+            return jsonify({"output": "No code provided."})
+
+        if language == "python":
+            with tempfile.NamedTemporaryFile(suffix=".py", delete=False, mode="w", encoding="utf-8") as f:
+                f.write(code)
+                temp_name = f.name
+            try:
+                res = subprocess.run(
+                    [sys.executable, temp_name],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                output = res.stdout + res.stderr
+                if not output:
+                    output = "Code executed successfully with no output."
+            except subprocess.TimeoutExpired:
+                output = "Error: Code execution timed out (5 seconds limit)."
+            except Exception as e:
+                output = f"Execution Error: {str(e)}"
+            finally:
+                try:
+                    os.remove(temp_name)
+                except Exception:
+                    pass
+
+        elif language == "javascript":
+            with tempfile.NamedTemporaryFile(suffix=".js", delete=False, mode="w", encoding="utf-8") as f:
+                f.write(code)
+                temp_name = f.name
+            try:
+                res = subprocess.run(
+                    ["node", temp_name],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                output = res.stdout + res.stderr
+                if not output:
+                    output = "Code executed successfully with no output."
+            except FileNotFoundError:
+                output = "Error: Node.js runtime not found. Please ensure Node.js is installed and added to your system PATH."
+            except subprocess.TimeoutExpired:
+                output = "Error: Code execution timed out (5 seconds limit)."
+            except Exception as e:
+                output = f"Execution Error: {str(e)}"
+            finally:
+                try:
+                    os.remove(temp_name)
+                except Exception:
+                    pass
+        else:
+            output = f"Language '{language}' execution is not supported locally. Use 'Copy to Chat' to write code as your answer."
+
+        return jsonify({"output": output})
+    except Exception as e:
+        logger.exception("IDE execution failed")
+        return jsonify({"output": f"Execution Error: {str(e)}"}), 500
 
 
 # ── Entry point ───────────────────────────────────────────────

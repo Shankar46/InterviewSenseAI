@@ -16,8 +16,9 @@ const UI = (() => {
   const fileBadge     = document.getElementById("file-badge");
   const fileNameEl    = document.getElementById("file-name");
   const envBadge      = document.getElementById("env-badge");
+  const toastContainer = document.getElementById("toast-container");
 
-  // ── Markdown rendering ────────────────────────────────────
+  // ── Markdown rendering ─────────────────────────────────────
   function _renderMarkdown(content) {
     if (!content) return "";
     if (window.marked && typeof marked.parse === "function") {
@@ -29,7 +30,27 @@ const UI = (() => {
       .replace(/\n/g, "<br>");
   }
 
-  // ── Messages ──────────────────────────────────────────────
+  // ── Skeleton loader ────────────────────────────────────────
+  function _buildSkeleton() {
+    return `
+      <div class="skeleton-wrap">
+        <div class="skeleton-line" style="width:85%"></div>
+        <div class="skeleton-line" style="width:65%"></div>
+        <div class="skeleton-line" style="width:75%"></div>
+        <div class="skeleton-line" style="width:50%"></div>
+      </div>`;
+  }
+
+  // ── Copy to clipboard ──────────────────────────────────────
+  function _copyText(text, btn) {
+    navigator.clipboard.writeText(text).then(() => {
+      btn.textContent = "✓";
+      btn.classList.add("copied");
+      setTimeout(() => { btn.textContent = "⎘"; btn.classList.remove("copied"); }, 1800);
+    }).catch(() => showToast("Copy failed.", "warning"));
+  }
+
+  // ── Messages ───────────────────────────────────────────────
   function renderMessages(messages, mode) {
     messagesWrap.innerHTML = "";
 
@@ -38,17 +59,30 @@ const UI = (() => {
       return;
     }
 
-    messages.forEach(m => {
+    messages.forEach((m, idx) => {
       const wrap = document.createElement("div");
       wrap.className = `msg ${m.role}`;
+      // Stagger fade-in
+      wrap.style.animationDelay = `${Math.min(idx * 0.04, 0.4)}s`;
 
       const bubble = document.createElement("div");
       bubble.className = "bubble";
 
       if (m.content === "__loading__") {
-        bubble.innerHTML = `<div class="typing-dots"><span></span><span></span><span></span></div>`;
+        bubble.innerHTML = _buildSkeleton();
       } else {
-        bubble.innerHTML = _renderMarkdown(m.content || "");
+        const html = _renderMarkdown(m.content || "");
+        bubble.innerHTML = html;
+
+        // Copy button for assistant messages
+        if (m.role === "assistant") {
+          const copyBtn = document.createElement("button");
+          copyBtn.className = "copy-btn";
+          copyBtn.title     = "Copy response";
+          copyBtn.textContent = "⎘";
+          copyBtn.onclick   = () => _copyText(m.content, copyBtn);
+          bubble.appendChild(copyBtn);
+        }
       }
 
       wrap.appendChild(bubble);
@@ -73,11 +107,20 @@ const UI = (() => {
     return d;
   }
 
-  // ── Sidebar ───────────────────────────────────────────────
+  // ── Sidebar ────────────────────────────────────────────────
   function renderSidebar(chats, currentId, onSelect, onDownload, onDelete) {
     chatListEl.innerHTML = "";
 
-    Object.keys(chats).reverse().forEach(id => {
+    const ids = Object.keys(chats).reverse();
+    if (ids.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "sidebar-empty";
+      empty.textContent = "No sessions yet";
+      chatListEl.appendChild(empty);
+      return;
+    }
+
+    ids.forEach(id => {
       const chat = chats[id];
       const item = document.createElement("div");
       item.className = `chat-item${id === currentId ? " active" : ""}`;
@@ -96,7 +139,7 @@ const UI = (() => {
       dlBtn.onclick = e => { e.stopPropagation(); onDownload(id); };
 
       const delBtn = document.createElement("button");
-      delBtn.className = "ci-btn"; delBtn.textContent = "✕"; delBtn.title = "Delete session";
+      delBtn.className = "ci-btn ci-del"; delBtn.textContent = "✕"; delBtn.title = "Delete session";
       delBtn.onclick = e => { e.stopPropagation(); onDelete(id); };
 
       actions.append(dlBtn, delBtn);
@@ -105,7 +148,7 @@ const UI = (() => {
     });
   }
 
-  // ── Tracker ───────────────────────────────────────────────
+  // ── Tracker ────────────────────────────────────────────────
   function renderTracker(tracker, currentDay, onDayClick) {
     trackerGrid.innerHTML = "";
     let done = 0, fail = 0, pend = 0;
@@ -136,7 +179,7 @@ const UI = (() => {
     }
   }
 
-  // ── Notifications ─────────────────────────────────────────
+  // ── Notifications ──────────────────────────────────────────
   function renderNotifications(notifications) {
     notifList.innerHTML = "";
 
@@ -150,7 +193,9 @@ const UI = (() => {
       const item = document.createElement("div");
       item.className = `notif-item ${n.type || "info"}`;
       const time = n.created_at
-        ? new Date(n.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        ? (typeof n.created_at === "string" && n.created_at.includes(":")
+            ? n.created_at   // already formatted HH:MM
+            : new Date(n.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))
         : "";
       item.innerHTML = `
         <div class="ni-title">${n.title}</div>
@@ -165,19 +210,42 @@ const UI = (() => {
     if (notifDot) notifDot.classList.toggle("active", active);
   }
 
-  // ── Env badge ─────────────────────────────────────────────
+  // ── Toast notifications ────────────────────────────────────
+  function showToast(message, type = "info") {
+    if (!toastContainer) return;
+    const toast = document.createElement("div");
+    toast.className = `toast toast-${type}`;
+
+    const icon = { info: "ℹ️", success: "✅", warning: "⚠️", error: "❌" }[type] || "ℹ️";
+    toast.innerHTML = `<span class="toast-icon">${icon}</span><span class="toast-msg">${message}</span>`;
+
+    toastContainer.appendChild(toast);
+    // Trigger animation
+    requestAnimationFrame(() => toast.classList.add("toast-show"));
+
+    setTimeout(() => {
+      toast.classList.remove("toast-show");
+      toast.classList.add("toast-hide");
+      setTimeout(() => toast.remove(), 350);
+    }, 3500);
+  }
+
+  // ── Env badge ──────────────────────────────────────────────
   function setEnvBadge(mode) {
     if (!envBadge) return;
     if (mode === "career") {
       envBadge.textContent = "🚀 Career Mode";
       envBadge.className = "env-badge career";
+    } else if (mode === "interview") {
+      envBadge.textContent = "🎯 Interview Mode";
+      envBadge.className = "env-badge interview";
     } else {
       envBadge.textContent = "📚 Study Mode";
       envBadge.className = "env-badge study";
     }
   }
 
-  // ── File badge ────────────────────────────────────────────
+  // ── File badge ─────────────────────────────────────────────
   function showFile(name) {
     if (!fileBadge) return;
     if (fileNameEl) fileNameEl.textContent = name;
@@ -196,6 +264,7 @@ const UI = (() => {
     renderStreak,
     renderNotifications,
     setNotifDot,
+    showToast,
     setEnvBadge,
     showFile,
     clearFile,

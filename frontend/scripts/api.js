@@ -107,5 +107,77 @@ const Api = (() => {
     } catch { return false; }
   }
 
-  return { generate, fetchProgress, resetSession, deleteSession, getNotifications, markNotificationsRead, getStats, healthCheck };
+  // ── Interview ─────────────────────────────────────────
+  async function startInterview({ chatId, role, company, jdText, resumeFile, domain, roundType, weeklyCareerDay }) {
+    const form = new FormData();
+    form.append("chat_id",  chatId);
+    form.append("role",     role);
+    form.append("company",  company);
+    form.append("jd_text",  jdText);
+    form.append("domain",   domain || "it");
+    form.append("round_type", roundType || "tech");
+    form.append("weekly_career_day", weeklyCareerDay || 0);
+    if (resumeFile instanceof File) {
+      form.append("resume_file", resumeFile, resumeFile.name);
+    }
+    const res = await _fetch(_url(CONFIG.ENDPOINTS.INTERVIEW_START), {
+      method: "POST", body: form, timeout: 120000,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `Server error ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async function submitAnswer({ chatId, answer }) {
+    const form = new FormData();
+    form.append("chat_id", chatId);
+    form.append("answer",  answer);
+    const res = await _fetch(_url(CONFIG.ENDPOINTS.INTERVIEW_ANSWER), {
+      method: "POST", body: form, timeout: 90000,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `Server error ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async function getInterviewReport(chatId) {
+    const res = await _fetch(
+      _url(CONFIG.ENDPOINTS.INTERVIEW_REPORT + `?chat_id=${chatId}`),
+      { timeout: 10000 }
+    );
+    if (!res.ok) return null;
+    return res.json().catch(() => null);
+  }
+
+  async function resetInterview(chatId) {
+    const form = new FormData();
+    form.append("chat_id", chatId);
+    await _fetch(_url(CONFIG.ENDPOINTS.INTERVIEW_RESET), {
+      method: "POST", body: form, timeout: 10000,
+    }).catch(() => {});
+  }
+
+  async function runCode({ language, code }) {
+    const form = new FormData();
+    form.append("language", language);
+    form.append("code",     code);
+    const res = await _fetch(_url("/api/ide/run"), {
+      method: "POST", body: form, timeout: 15000,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.output || `Server error ${res.status}`);
+    }
+    return res.json();
+  }
+
+  return {
+    generate, fetchProgress, resetSession, deleteSession,
+    getNotifications, markNotificationsRead, getStats, healthCheck,
+    startInterview, submitAnswer, getInterviewReport, resetInterview, runCode,
+  };
 })();

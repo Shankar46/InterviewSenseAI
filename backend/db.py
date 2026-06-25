@@ -76,10 +76,44 @@ def init_db():
                 is_read         INTEGER NOT NULL DEFAULT 0,
                 created_at      TEXT NOT NULL DEFAULT (datetime('now'))
             );
+
+            CREATE TABLE IF NOT EXISTS interview_sessions (
+                chat_id       TEXT    PRIMARY KEY,
+                role          TEXT    NOT NULL DEFAULT '',
+                company       TEXT    NOT NULL DEFAULT '',
+                jd_text       TEXT    NOT NULL DEFAULT '',
+                resume_text   TEXT    NOT NULL DEFAULT '',
+                status        TEXT    NOT NULL DEFAULT 'active',
+                question_idx  INTEGER NOT NULL DEFAULT 0,
+                total_q       INTEGER NOT NULL DEFAULT 0,
+                question_bank TEXT    NOT NULL DEFAULT '[]',
+                created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS interview_qa (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id      TEXT    NOT NULL,
+                q_index      INTEGER NOT NULL,
+                question     TEXT    NOT NULL,
+                q_type       TEXT    NOT NULL DEFAULT 'jd',
+                user_answer  TEXT,
+                score        INTEGER,
+                feedback     TEXT,
+                strengths    TEXT,
+                gaps         TEXT,
+                model_answer TEXT,
+                asked_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+                UNIQUE (chat_id, q_index)
+            );
         """)
 
         # Safely add any missing columns for older databases
         _migrate(conn)
+    try:
+        from backend.interview_assistant import init_interview_db
+        init_interview_db()
+    except Exception as e:
+        logger.warning("Failed to run interview db init: %s", e)
     logger.info("Database initialised at %s", DB_NAME)
 
 

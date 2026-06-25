@@ -1,18 +1,23 @@
 // Central configuration — edit BACKEND_URL to point at your Flask server.
 
 const CONFIG = Object.freeze({
-  // Leave empty so it automatically routes to your live Vercel domain
-  BACKEND_URL: "", 
+  // Set to your local Flask server when running locally.
+  // Change back to "" when deploying to Vercel.
+  BACKEND_URL: "",
 
   ENDPOINTS: {
-    STUDY:         "/api/workspace/generate",
-    CAREER:        "/api/edtech/generate",
-    RESET:         "/api/edtech/reset",
-    DELETE:        "/api/edtech/delete",
-    STATS:         "/api/edtech/stats",
-    NOTIFICATIONS: "/api/notifications",
-    NOTIF_READ:    "/api/notifications/read",
-    HEALTH:        "/api/health",
+    STUDY:            "/api/workspace/generate",
+    CAREER:           "/api/edtech/generate",
+    RESET:            "/api/edtech/reset",
+    DELETE:           "/api/edtech/delete",
+    STATS:            "/api/edtech/stats",
+    NOTIFICATIONS:    "/api/notifications",
+    NOTIF_READ:       "/api/notifications/read",
+    HEALTH:           "/api/health",
+    INTERVIEW_START:  "/api/interview/start",
+    INTERVIEW_ANSWER: "/api/interview/answer",
+    INTERVIEW_REPORT: "/api/interview/report",
+    INTERVIEW_RESET:  "/api/interview/reset",
   },
 
   MAX_HISTORY_TURNS: 8,
