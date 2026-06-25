@@ -346,7 +346,7 @@ def interview_reset_endpoint():
 
 @app.route("/api/ide/run", methods=["POST"])
 def ide_run_endpoint():
-    """Execute python or javascript code safely using local runtimes."""
+    """Execute python, javascript, java, or cpp code safely using local runtimes."""
     import subprocess
     import tempfile
     try:
@@ -405,6 +405,88 @@ def ide_run_endpoint():
                     os.remove(temp_name)
                 except Exception:
                     pass
+
+        elif language == "java":
+            import re
+            import shutil
+            match = re.search(r"public\s+class\s+(\w+)", code)
+            class_name = match.group(1) if match else "Solution"
+            
+            temp_dir = tempfile.mkdtemp()
+            temp_name = os.path.join(temp_dir, f"{class_name}.java")
+            with open(temp_name, "w", encoding="utf-8") as f:
+                f.write(code)
+            try:
+                comp_res = subprocess.run(
+                    ["javac", temp_name],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if comp_res.returncode != 0:
+                    output = "Compilation Error:\n" + comp_res.stderr
+                else:
+                    run_res = subprocess.run(
+                        ["java", "-cp", temp_dir, class_name],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+                    output = run_res.stdout + run_res.stderr
+                    if not output:
+                        output = "Code executed successfully with no output."
+            except FileNotFoundError:
+                output = "Error: Java JDK (javac/java) compiler/runtime not found on host machine."
+            except subprocess.TimeoutExpired:
+                output = "Error: Code execution timed out (5 seconds limit)."
+            except Exception as e:
+                output = f"Execution Error: {str(e)}"
+            finally:
+                try:
+                    shutil.rmtree(temp_dir)
+                except Exception:
+                    pass
+
+        elif language in ("cpp", "c++"):
+            with tempfile.NamedTemporaryFile(suffix=".cpp", delete=False, mode="w", encoding="utf-8") as f:
+                f.write(code)
+                temp_name = f.name
+            exe_name = temp_name + ".exe"
+            try:
+                comp_res = subprocess.run(
+                    ["g++", temp_name, "-o", exe_name],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if comp_res.returncode != 0:
+                    output = "Compilation Error:\n" + comp_res.stderr
+                else:
+                    run_res = subprocess.run(
+                        [exe_name],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+                    output = run_res.stdout + run_res.stderr
+                    if not output:
+                        output = "Code executed successfully with no output."
+            except FileNotFoundError:
+                output = "Error: GNU C++ Compiler (g++) not found on host machine."
+            except subprocess.TimeoutExpired:
+                output = "Error: Code execution timed out (5 seconds limit)."
+            except Exception as e:
+                output = f"Execution Error: {str(e)}"
+            finally:
+                try:
+                    os.remove(temp_name)
+                except Exception:
+                    pass
+                try:
+                    os.remove(exe_name)
+                except Exception:
+                    pass
+
         else:
             output = f"Language '{language}' execution is not supported locally. Use 'Copy to Chat' to write code as your answer."
 

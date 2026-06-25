@@ -99,6 +99,9 @@ const Interview = (() => {
       // Don't block — let them proceed without
     }
 
+    // Request fullscreen immediately synchronously under user click event handler
+    _enterFullscreen();
+
     // Disable button, show loading
     if (startBtn) { startBtn.disabled = true; startBtn.textContent = "⏳ Generating questions…"; }
 
@@ -125,8 +128,6 @@ const Interview = (() => {
       _totalQ      = data.total || 10;
       _scores      = [];
 
-      _enterFullscreen();
-
       // Collapse config bar, show progress
       _collapseConfig(config.role, config.company);
       _updateProgress();
@@ -148,6 +149,8 @@ const Interview = (() => {
       _renderInterviewMessages(Store.getMessages(chatId));
 
     } catch (err) {
+      // Revert fullscreen on failure
+      _exitFullscreen();
       Store.removeLoadingMessage(chatId);
       Store.addMessage(chatId, "assistant", `⚠️ ${err.message}`);
       _renderInterviewMessages(Store.getMessages(chatId));
@@ -610,6 +613,10 @@ const Interview = (() => {
       return `# Write your Python solution here\n\ndef solve():\n    # code goes here\n    pass\n\nsolve()\n`;
     } else if (lang === "javascript") {
       return `// Write your JavaScript solution here\n\nfunction solve() {\n    // code goes here\n}\n\nsolve();\n`;
+    } else if (lang === "java") {
+      return `// Write your Java solution here\n\npublic class Solution {\n    public static void main(String[] args) {\n        // code goes here\n    }\n}\n`;
+    } else if (lang === "cpp") {
+      return `// Write your C++ solution here\n\n#include <iostream>\nusing namespace std;\n\nint main() {\n    // code goes here\n    return 0;\n}\n`;
     }
     return `// Write your code here\n`;
   }
