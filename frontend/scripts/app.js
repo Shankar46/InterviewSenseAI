@@ -62,6 +62,9 @@ const App = (() => {
 
     if (interviewConfigBar) interviewConfigBar.classList.toggle("visible", isInterview);
 
+    const voiceBtn = document.getElementById("voice-toggle-btn");
+    if (voiceBtn) voiceBtn.style.display = isInterview ? "" : "none";
+
     // Hide attach zone in interview mode (not needed)
     const inputZone = document.querySelector(".input-zone");
     if (inputZone) inputZone.style.display = isInterview ? "none" : "";
@@ -129,6 +132,9 @@ const App = (() => {
     // Hide weekly interview btn
     const weeklyBtn = document.getElementById("weekly-interview-btn");
     if (weeklyBtn) weeklyBtn.style.display = "none";
+
+    const voiceBtn = document.getElementById("voice-toggle-btn");
+    if (voiceBtn) voiceBtn.style.display = "none";
 
     // Replace history entry so another Back press leaves the site (expected behaviour)
     history.replaceState({ isai: false }, "", location.pathname);
@@ -319,8 +325,105 @@ const App = (() => {
     };
   }
 
+  function _updateApiKeyStatusUI() {
+    const key = localStorage.getItem("user_hf_api_key");
+    const gwStatus = document.getElementById("gateway-key-status");
+    const modalKeyInput = document.getElementById("modal-hf-key");
+
+    if (key) {
+      if (gwStatus) {
+        gwStatus.className = "key-status-badge active";
+        gwStatus.textContent = "🟢 Custom API Key Active";
+      }
+      if (modalKeyInput) {
+        modalKeyInput.value = key;
+      }
+    } else {
+      if (gwStatus) {
+        gwStatus.className = "key-status-badge shared";
+        gwStatus.textContent = "🔴 Shared Key (Demo Mode)";
+      }
+      if (modalKeyInput) {
+        modalKeyInput.value = "";
+      }
+    }
+  }
+
+  function _wireApiKeyModal() {
+    const apiBtn = document.getElementById("api-key-btn");
+    const gwApiBtn = document.getElementById("gateway-key-btn");
+    const closeBtn = document.getElementById("api-key-close-btn");
+    const modal = document.getElementById("api-key-modal");
+    const saveBtn = document.getElementById("api-key-save-btn");
+    const clearBtn = document.getElementById("api-key-clear-btn");
+    const keyInput = document.getElementById("modal-hf-key");
+    const toggleVisBtn = document.getElementById("toggle-hf-key-visibility");
+
+    const openModal = () => {
+      _updateApiKeyStatusUI();
+      if (modal) {
+        modal.style.display = "flex";
+      }
+      if (keyInput) {
+        keyInput.focus();
+      }
+    };
+
+    const closeModal = () => {
+      if (modal) modal.style.display = "none";
+    };
+
+    if (apiBtn) apiBtn.onclick = openModal;
+    if (gwApiBtn) gwApiBtn.onclick = openModal;
+    if (closeBtn) closeBtn.onclick = closeModal;
+
+    if (modal) {
+      modal.onclick = e => {
+        if (e.target === modal) closeModal();
+      };
+    }
+
+    if (saveBtn) {
+      saveBtn.onclick = () => {
+        if (!keyInput) return;
+        const val = keyInput.value.trim();
+        if (!val) {
+          UI.showToast("Please enter a valid token.", "warning");
+          return;
+        }
+        localStorage.setItem("user_hf_api_key", val);
+        _updateApiKeyStatusUI();
+        UI.showToast("Hugging Face token saved successfully!", "success");
+        closeModal();
+      };
+    }
+
+    if (clearBtn) {
+      clearBtn.onclick = () => {
+        localStorage.removeItem("user_hf_api_key");
+        _updateApiKeyStatusUI();
+        UI.showToast("Hugging Face token cleared.", "info");
+        closeModal();
+      };
+    }
+
+    if (toggleVisBtn && keyInput) {
+      toggleVisBtn.onclick = () => {
+        const isPass = keyInput.type === "password";
+        keyInput.type = isPass ? "text" : "password";
+        toggleVisBtn.textContent = isPass ? "🙈" : "👁️";
+      };
+    }
+  }
+
   // ── Bootstrap ──────────────────────────────────────────────
-  function init() {
+  async function init() {
+    // Initialize authentication and verify credentials
+    Auth.init();
+    const isAuthed = await Auth.checkAuth();
+
+    _updateApiKeyStatusUI();
+    _wireApiKeyModal();
     // Ensure a clean history baseline (no #hash from old visits)
     if (location.hash === "") {
       history.replaceState({ isai: false }, "", location.pathname);
@@ -442,12 +545,16 @@ const App = (() => {
     // Wire resume upload zone and IDE editor
     Interview.initUploadZone();
     Interview.initIDE();
+    Interview.initVoiceToggle();
+    Interview.initMicButton();
 
     // Restore workspace from session storage (page refresh)
-    const saved = safeGet(CONFIG.STORAGE_KEY);
-    if (saved === "study" || saved === "career" || saved === "interview") {
-      // Don't push a new history entry — we're restoring an existing state
-      activateWorkspace(saved, false);
+    if (isAuthed) {
+      const saved = safeGet(CONFIG.STORAGE_KEY);
+      if (saved === "study" || saved === "career" || saved === "interview") {
+        // Don't push a new history entry — we're restoring an existing state
+        activateWorkspace(saved, false);
+      }
     }
   }
 

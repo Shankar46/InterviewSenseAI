@@ -20,11 +20,58 @@
 <body>
 
 <!-- ══════════════════════════════════════════════════════════
+     AUTHENTICATION SCREEN
+══════════════════════════════════════════════════════════ -->
+<div id="auth-screen">
+  <div class="auth-glow auth-glow-1"></div>
+  <div class="auth-glow auth-glow-2"></div>
+  
+  <div class="auth-card">
+    <div class="auth-logo">InterviewSense AI</div>
+    <h2 class="auth-title" id="auth-card-title">Welcome Back</h2>
+    <p class="auth-subtitle" id="auth-card-subtitle">Please sign in to access your intelligence suite.</p>
+    
+    <form id="auth-form" novalidate>
+      <div class="auth-form-group">
+        <label for="auth-username" class="auth-label">Username</label>
+        <div class="auth-input-wrapper">
+          <span class="auth-input-icon">👤</span>
+          <input type="text" id="auth-username" required placeholder="Enter your username" autocomplete="username">
+        </div>
+      </div>
+      
+      <div class="auth-form-group">
+        <label for="auth-password" class="auth-label">Password</label>
+        <div class="auth-input-wrapper">
+          <span class="auth-input-icon">🔒</span>
+          <input type="password" id="auth-password" required placeholder="Enter your password" autocomplete="current-password">
+        </div>
+      </div>
+      
+      <button type="submit" class="auth-submit-btn" id="auth-submit-btn">
+        <span>Sign In</span>
+      </button>
+    </form>
+    
+    <div class="auth-toggle-text">
+      <span id="auth-toggle-msg">Don't have an account?</span>
+      <button type="button" class="auth-toggle-btn" id="auth-toggle-btn">Sign Up</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
      GATEWAY
 ══════════════════════════════════════════════════════════ -->
 <div id="gateway">
   <div class="gw-inner">
     <div class="gw-logo">InterviewSense AI</div>
+    <div class="gateway-settings-bar">
+      <span id="gateway-user-badge" class="user-badge-text">👤 <span id="gateway-username-display"></span></span>
+      <button id="gateway-logout-btn" class="settings-btn" type="button" title="Sign Out">🚪 Logout</button>
+      <span id="gateway-key-status" class="key-status-badge shared">🔴 Shared Key (Demo Mode)</span>
+      <button id="gateway-key-btn" class="settings-btn" type="button">🔑 Setup API Key</button>
+    </div>
     <h1 class="gw-title">Your Adaptive<br>Intelligence Suite</h1>
     <p class="gw-sub">
       Build career roadmaps, ace technical interviews,<br>
@@ -65,6 +112,10 @@
     <span class="env-badge study" id="env-badge">📚 Study Mode</span>
 
     <div class="topbar-actions">
+      <span id="topbar-user-badge" class="user-badge-text">👤 <span id="topbar-username-display"></span></span>
+      <button class="tb-btn" id="logout-btn" title="Sign Out">🚪 Logout</button>
+      <button class="tb-btn" id="api-key-btn" title="Configure API Key">🔑 API Key</button>
+      <button class="tb-btn" id="voice-toggle-btn" style="display:none;" title="Toggle Speech Output">🔊 Voice: On</button>
       <button class="tb-btn" id="ide-toggle-btn" style="display:none" title="Toggle Code Editor">💻 Editor</button>
       <button class="tb-btn" id="weekly-interview-btn" style="display:none;" title="Mandatory weekly mock interview. Complete this mock interview to mark the last 2 days of this week as completed.">🎯 Weekly Mock Interview</button>
       <button class="notif-btn" id="notif-btn" title="Notifications">
@@ -319,8 +370,12 @@
       <!-- INTERVIEW INPUT ZONE -->
       <div class="input-zone interview-input-zone" id="interview-input-zone" style="display:none">
         <div class="input-row">
-          <textarea class="iw-answer-input" id="iw-answer-input" rows="2" placeholder="Type your interview answer here… be specific and use real examples."></textarea>
+          <button class="mic-btn" id="iw-mic-btn" type="button" title="Speak Answer">🎙️</button>
+          <textarea class="iw-answer-input" id="iw-answer-input" rows="2" placeholder="Type your answer or click the mic to speak…"></textarea>
           <button class="send-btn iw-send-btn" id="iw-send-btn" type="button" title="Submit answer">➤</button>
+        </div>
+        <div class="mic-status-bar" id="iw-mic-status" style="display: none;">
+          <span class="mic-dot"></span> Listening... speak your answer clearly.
         </div>
       </div>
 
@@ -338,12 +393,63 @@
   </div>
 </div>
 
+<!-- API Key Configuration Modal -->
+<div id="api-key-modal" class="modal-overlay" style="display: none;">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>🔑 Hugging Face API Key Setup</h3>
+      <button class="modal-close" id="api-key-close-btn" type="button">✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="modal-desc">
+        Configure your personal Hugging Face API key to enable direct completions. If no key is set, you will use a shared demo key (limited to 3 questions for Mock Interviews).
+      </p>
+
+      <div class="form-group">
+        <label for="modal-hf-key" class="form-label">Hugging Face API Token (HF_TOKEN)</label>
+        <div class="api-key-input-container">
+          <input type="password" id="modal-hf-key" placeholder="hf_..." autocomplete="off">
+          <button id="toggle-hf-key-visibility" class="visibility-btn" type="button" title="Show/Hide Key">👁️</button>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="api-key-save-btn" type="button">Save Token</button>
+        <button class="btn btn-secondary" id="api-key-clear-btn" type="button">Clear Token</button>
+      </div>
+
+      <div class="setup-guide">
+        <h4>📋 How to get a free Hugging Face API Key:</h4>
+        <ol>
+          <li>Create or log in to your account at <a href="https://huggingface.co/" target="_blank" rel="noopener noreferrer">Hugging Face</a>.</li>
+          <li>Go to your <strong>Profile</strong> (top right) &gt; <strong>Settings</strong> &gt; <strong>Access Tokens</strong>.</li>
+          <li>Click <strong>New token</strong>, give it a name (e.g. <code>InterviewSense</code>), set the role to <strong>Read</strong>, and click <strong>Generate token</strong>.</li>
+          <li>Copy the generated token starting with <code>hf_</code> and paste it above.</li>
+        </ol>
+      </div>
+      
+      <div class="video-reference-container">
+        <h4>🎥 Video Walkthrough:</h4>
+        <div class="video-placeholder-card">
+          <div class="video-card-icon">▶️</div>
+          <div class="video-card-details">
+            <strong>How to Generate Hugging Face API Tokens</strong>
+            <span>Watch a quick step-by-step video tutorial</span>
+          </div>
+          <a href="https://www.youtube.com/watch?v=dQw4w9WgXcQ" target="_blank" rel="noopener noreferrer" class="watch-video-btn">Watch Video</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Toast container -->
 <div id="toast-container"></div>
 
 <!-- ── Scripts (order matters) ───────────────────────────── -->
 <script src="scripts/config.js?v=20260625"></script>
 <script src="scripts/store.js?v=20260625"></script>
+<script src="scripts/auth.js?v=20260625"></script>
 <script src="scripts/api.js?v=20260625"></script>
 <script src="scripts/ui.js?v=20260625"></script>
 <script src="scripts/chat.js?v=20260625"></script>

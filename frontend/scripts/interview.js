@@ -10,6 +10,9 @@ const Interview = (() => {
   let _scores      = [];
   let _resumeFile  = null;   // File object from upload zone
   let _isFullscreenRequired = false;
+  let _voiceMuted = false;
+  let _recognition = null;
+  let _isListening = false;
 
   // ── Getters ───────────────────────────────────────────────
   function _getConfig() {
@@ -94,6 +97,23 @@ const Interview = (() => {
       UI.showToast("Please enter a target role.", "warning");
       return;
     }
+
+    const userApiKey = localStorage.getItem("user_hf_api_key");
+    if (config.weeklyCareerDay > 0 && !userApiKey) {
+      UI.showToast("A personal Hugging Face API key is required to take weekly milestone evaluations.", "warning");
+      const modal = document.getElementById("api-key-modal");
+      if (modal) {
+        modal.style.display = "flex";
+        const keyInput = document.getElementById("modal-hf-key");
+        if (keyInput) keyInput.focus();
+      }
+      return;
+    }
+
+    if (!userApiKey) {
+      UI.showToast("Running in Demo Mode (limited to 3 questions).", "info");
+    }
+
     if (!config.resumeFile && !config.jdText) {
       UI.showToast("Please upload a resume or paste a JD for better questions.", "warning");
       // Don't block — let them proceed without
@@ -147,6 +167,7 @@ const Interview = (() => {
       })}`);
 
       _renderInterviewMessages(Store.getMessages(chatId));
+      _speakText(data.message + ". " + data.question);
 
     } catch (err) {
       // Revert fullscreen on failure
@@ -162,6 +183,7 @@ const Interview = (() => {
 
   // ── Submit answer ─────────────────────────────────────────────
   async function send() {
+    _stopSpeechRecognition();
     if (!_isActive) {
       UI.showToast("Fill in the form above and click 'Start Mock Interview' first.", "warning");
       return;
@@ -207,6 +229,7 @@ const Interview = (() => {
           total:    data.total,
         })}`);
         _updateProgress();
+        _speakText(data.next_question);
 
       } else if (data.status === "feedback_and_complete") {
         const report = data.report || {};
@@ -214,6 +237,7 @@ const Interview = (() => {
         _isActive = false;
         _showCompletionBadge();
         _exitFullscreen();
+        _speakText("The mock interview is complete. Generating your performance report card.");
       }
 
       _renderInterviewMessages(Store.getMessages(chatId));
@@ -555,6 +579,8 @@ const Interview = (() => {
 
   // ── Reset ──────────────────────────────────────────────────
   function resetAndRestart() {
+    _stopSpeechRecognition();
+    window.speechSynthesis.cancel();
     _isActive    = false;
     _currentQNum = 0;
     _totalQ      = 0;
@@ -731,6 +757,8 @@ const Interview = (() => {
     if (!overlay) return;
     
     if (_isFullscreenRequired && !isFS) {
+      _stopSpeechRecognition();
+      window.speechSynthesis.cancel();
       overlay.style.display = "flex";
       document.getElementById("fs-resume-btn")?.focus();
     } else {
@@ -738,5 +766,165 @@ const Interview = (() => {
     }
   }
 
-  return { start, send, renderMessages, resetAndRestart, initUploadZone, initIDE };
+  // ── Speech Synthesis & Recognition ─────────────────────────
+  function _speakText(text) {
+    if (_voiceMuted) return;
+    window.speechSynthesis.cancel();
+    
+    const cleaned = text
+      .replace(/[\*\#\`\_\-\>]/g, "")
+      .replace(/\[.*?\]/g, "")
+      .replace(/\(.*?\)/g, "")
+      .replace(/__IQ__/g, "")
+      .replace(/__IF__/g, "")
+      .replace(/__IR__/g, "")
+      .replace(/\\n/g, " ")
+      .trim();
+
+    const utterance = new SpeechSynthesisUtterance(cleaned);
+    const voices = window.speechSynthesis.getVoices();
+    const enVoice = voices.find(v => v.lang.startsWith("en"));
+    if (enVoice) utterance.voice = enVoice;
+    
+    window.speechSynthesis.speak(utterance);
+  }
+
+  function _initSpeechRecognition() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+    
+    _recognition = new SpeechRecognition();
+    _recognition.continuous = false;
+    _recognition.interimResults = true;
+    _recognition.lang = "en-US";
+
+    _recognition.onstart = () => {
+      _isListening = true;
+      const micBtn = document.getElementById("iw-mic-btn");
+      if (micBtn) {
+        micBtn.classList.add("listening");
+        micBtn.textContent = "🛑";
+      }
+      const statusBar = document.getElementById("iw-mic-status");
+      if (statusBar) statusBar.style.display = "flex";
+    };
+
+    _recognition.onresult = event => {
+      let interimTranscript = "";
+      let finalTranscript = "";
+
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript;
+        } else {
+          interimTranscript += event.results[i][0].transcript;
+        }
+      }
+
+      const answerEl = document.getElementById("iw-answer-input");
+      if (answerEl) {
+        const currentVal = answerEl.value;
+        if (finalTranscript) {
+          answerEl.value = (currentVal + " " + finalTranscript).trim();
+        }
+      }
+    };
+
+    _recognition.onerror = event => {
+      console.error("Speech recognition error:", event.error);
+      if (event.error === "not-allowed") {
+        UI.showToast("Microphone access denied. Please grant permission in browser settings.", "error");
+      }
+      _stopSpeechRecognition();
+    };
+
+    _recognition.onend = () => {
+      _isListening = false;
+      const micBtn = document.getElementById("iw-mic-btn");
+      if (micBtn) {
+        micBtn.classList.remove("listening");
+        micBtn.textContent = "🎙️";
+      }
+      const statusBar = document.getElementById("iw-mic-status");
+      if (statusBar) statusBar.style.display = "none";
+    };
+  }
+
+  function _toggleSpeechRecognition() {
+    if (!_recognition) {
+      _initSpeechRecognition();
+    }
+    if (!_recognition) {
+      UI.showToast("Speech Recognition is not supported in this browser. Please use Chrome or Edge.", "warning");
+      return;
+    }
+
+    if (_isListening) {
+      _stopSpeechRecognition();
+    } else {
+      window.speechSynthesis.cancel();
+      try {
+        _recognition.start();
+      } catch (e) {
+        console.error("Failed to start speech recognition:", e);
+      }
+    }
+  }
+
+  function _stopSpeechRecognition() {
+    if (_recognition && _isListening) {
+      _recognition.stop();
+    }
+  }
+
+  function stopVoice() {
+    _stopSpeechRecognition();
+    window.speechSynthesis.cancel();
+  }
+
+  function initVoiceToggle() {
+    const btn = document.getElementById("voice-toggle-btn");
+    if (!btn) return;
+    
+    const saved = localStorage.getItem("user_interview_voice_muted");
+    if (saved === "true") {
+      _voiceMuted = true;
+      btn.textContent = "🔇 Voice: Off";
+      btn.classList.add("muted");
+    } else {
+      _voiceMuted = false;
+      btn.textContent = "🔊 Voice: On";
+      btn.classList.remove("muted");
+    }
+    
+    btn.onclick = () => {
+      _voiceMuted = !_voiceMuted;
+      if (_voiceMuted) {
+        btn.textContent = "🔇 Voice: Off";
+        btn.classList.add("muted");
+        localStorage.setItem("user_interview_voice_muted", "true");
+        window.speechSynthesis.cancel();
+      } else {
+        btn.textContent = "🔊 Voice: On";
+        btn.classList.remove("muted");
+        localStorage.setItem("user_interview_voice_muted", "false");
+        const wrap = document.getElementById("messages-wrap");
+        if (wrap) {
+          const qTextEl = wrap.querySelector(".iw-q-text");
+          if (qTextEl) {
+            _speakText(qTextEl.textContent);
+          }
+        }
+      }
+    };
+  }
+
+  function initMicButton() {
+    const micBtn = document.getElementById("iw-mic-btn");
+    if (micBtn) {
+      micBtn.onclick = () => _toggleSpeechRecognition();
+    }
+  }
+
+  return { start, send, renderMessages, resetAndRestart, initUploadZone, initIDE, initVoiceToggle, initMicButton, stopVoice };
 })();

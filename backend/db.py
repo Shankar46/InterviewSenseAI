@@ -2,6 +2,8 @@ import os
 import json
 import logging
 import sqlite3
+import hashlib
+import secrets
 from contextlib import contextmanager
 
 if os.environ.get("VERCEL"):
@@ -41,6 +43,25 @@ def _safe_json_list(raw: str) -> list:
 def init_db():
     with get_connection() as conn:
         conn.executescript("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                username        TEXT UNIQUE NOT NULL,
+                password_hash   TEXT NOT NULL,
+                created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS user_sessions (
+                session_token   TEXT PRIMARY KEY,
+                user_id         INTEGER NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                expires_at      TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS user_chats (
+                chat_id         TEXT PRIMARY KEY,
+                user_id         INTEGER NOT NULL REFERENCES users(user_id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS course_sessions (
                 chat_id         TEXT PRIMARY KEY,
                 role            TEXT    NOT NULL DEFAULT 'Python Developer',
@@ -119,6 +140,70 @@ def init_db():
 
 def _migrate(conn):
     """Non-destructive schema migrations for existing databases."""
+    # Check users table schema
+    users_existing = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+    if users_existing and "username" not in users_existing:
+        logger.info("Migrating legacy users table to new schema...")
+        conn.execute("ALTER TABLE users RENAME TO users_old")
+        
+        # Rename dependent tables to update/clear foreign key references
+        conn.execute("ALTER TABLE user_sessions RENAME TO user_sessions_old")
+        conn.execute("ALTER TABLE user_chats RENAME TO user_chats_old")
+        
+        conn.execute("""
+            CREATE TABLE users (
+                user_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                username        TEXT UNIQUE NOT NULL,
+                password_hash   TEXT NOT NULL,
+                created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+        """)
+        
+        conn.execute("""
+            CREATE TABLE user_sessions (
+                session_token   TEXT PRIMARY KEY,
+                user_id         INTEGER NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                expires_at      TEXT NOT NULL
+            )
+        """)
+        
+        conn.execute("""
+            CREATE TABLE user_chats (
+                chat_id         TEXT PRIMARY KEY,
+                user_id         INTEGER NOT NULL REFERENCES users(user_id) ON DELETE CASCADE
+            )
+        """)
+        
+        has_email = "email" in users_existing
+        has_password = "password" in users_existing
+        has_id = "id" in users_existing
+        
+        select_id = "id" if has_id else "NULL"
+        select_username = "email" if has_email else "''"
+        select_password = "password" if has_password else "''"
+        select_created = "created_at" if "created_at" in users_existing else "(datetime('now'))"
+        
+        conn.execute(f"""
+            INSERT INTO users (user_id, username, password_hash, created_at)
+            SELECT {select_id}, {select_username}, {select_password}, {select_created} FROM users_old
+        """)
+        
+        # Copy data for dependent tables if any existed
+        conn.execute("""
+            INSERT INTO user_sessions (session_token, user_id, created_at, expires_at)
+            SELECT session_token, user_id, created_at, expires_at FROM user_sessions_old
+        """)
+        conn.execute("""
+            INSERT INTO user_chats (chat_id, user_id)
+            SELECT chat_id, user_id FROM user_chats_old
+        """)
+        
+        conn.execute("DROP TABLE users_old")
+        conn.execute("DROP TABLE user_sessions_old")
+        conn.execute("DROP TABLE user_chats_old")
+        logger.info("Legacy users and dependent tables migrated successfully.")
+
     existing = {row[1] for row in conn.execute("PRAGMA table_info(course_sessions)").fetchall()}
     migrations = {
         "day_plan":    "ALTER TABLE course_sessions ADD COLUMN day_plan TEXT NOT NULL DEFAULT '[]'",
@@ -138,6 +223,7 @@ def _migrate(conn):
     for col, sql in prog_migrations.items():
         if col not in prog_existing:
             conn.execute(sql)
+
 
 
 # ── Session state ────────────────────────────────────────────
@@ -206,6 +292,7 @@ def delete_session(chat_id: str):
         conn.execute("DELETE FROM course_sessions WHERE chat_id = ?", (chat_id,))
         conn.execute("DELETE FROM progress WHERE chat_id = ?", (chat_id,))
         conn.execute("DELETE FROM notifications WHERE chat_id = ?", (chat_id,))
+        conn.execute("DELETE FROM user_chats WHERE chat_id = ?", (chat_id,))
 
 
 # ── Progress tracking ────────────────────────────────────────
@@ -315,3 +402,91 @@ def mark_notifications_read(chat_id: str):
         conn.execute(
             "UPDATE notifications SET is_read = 1 WHERE chat_id = ?", (chat_id,)
         )
+
+
+# ── Password & User Authentication Helpers ───────────────────
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_hex(16)
+    hash_bytes = hashlib.pbkdf2_hmac(
+        'sha256',
+        password.encode('utf-8'),
+        salt.encode('utf-8'),
+        100000
+    )
+    return f"{salt}:{hash_bytes.hex()}"
+
+
+def check_password(password: str, hashed: str) -> bool:
+    try:
+        salt, hash_hex = hashed.split(":")
+        hash_bytes = hashlib.pbkdf2_hmac(
+            'sha256',
+            password.encode('utf-8'),
+            salt.encode('utf-8'),
+            100000
+        )
+        return secrets.compare_digest(hash_bytes.hex(), hash_hex)
+    except Exception:
+        return False
+
+
+def register_user(username: str, password_raw: str) -> int | None:
+    try:
+        hashed = hash_password(password_raw)
+        with get_connection() as conn:
+            cursor = conn.execute(
+                "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+                (username, hashed)
+            )
+            return cursor.lastrowid
+    except sqlite3.IntegrityError:
+        return None
+
+
+def verify_user(username: str, password_raw: str) -> dict | None:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT user_id, username, password_hash FROM users WHERE username = ?",
+            (username,)
+        ).fetchone()
+    if row and check_password(password_raw, row["password_hash"]):
+        return {"user_id": row["user_id"], "username": row["username"]}
+    return None
+
+
+def create_user_session(user_id: int) -> str:
+    token = secrets.token_hex(32)
+    with get_connection() as conn:
+        conn.execute(
+            """INSERT INTO user_sessions (session_token, user_id, expires_at)
+               VALUES (?, ?, datetime('now', '+30 days'))""",
+            (token, user_id)
+        )
+    return token
+
+
+def invalidate_user_session(token: str):
+    with get_connection() as conn:
+        conn.execute("DELETE FROM user_sessions WHERE session_token = ?", (token,))
+
+
+def check_or_register_chat(chat_id: str, user_id: int) -> bool:
+    if not chat_id:
+        return False
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT user_id FROM user_chats WHERE chat_id = ?",
+            (chat_id,)
+        ).fetchone()
+        if row:
+            return row["user_id"] == user_id
+        else:
+            try:
+                conn.execute(
+                    "INSERT INTO user_chats (chat_id, user_id) VALUES (?, ?)",
+                    (chat_id, user_id)
+                )
+                return True
+            except sqlite3.IntegrityError:
+                return False

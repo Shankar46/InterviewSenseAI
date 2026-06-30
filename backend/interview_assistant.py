@@ -18,7 +18,8 @@ CAREER_RATIO    = 5           # 1 career question per CAREER_RATIO interview que
 # ── Question bank generation ──────────────────────────────────
 
 def _generate_question_bank(
-    role: str, company: str, jd_text: str, resume_text: str, career_topics: list, domain: str, round_type: str, weekly_career_day: int = 0
+    role: str, company: str, jd_text: str, resume_text: str, career_topics: list, domain: str, round_type: str, weekly_career_day: int = 0,
+    api_key: str = None
 ) -> list:
     """Generate a mixed question bank from JD/company/resume + career daily topics, tailored by domain/round."""
 
@@ -26,8 +27,10 @@ def _generate_question_bank(
         jd_q_count = 10
         coding_q_count = 2
     else:
-        career_q_count = max(1, TOTAL_QUESTIONS // CAREER_RATIO) if career_topics else 0
-        jd_q_count     = TOTAL_QUESTIONS - career_q_count
+        # Capping at 3 questions if no client API key is provided (Demo Session)
+        q_limit = 3 if not api_key else TOTAL_QUESTIONS
+        career_q_count = max(1, q_limit // CAREER_RATIO) if career_topics else 0
+        jd_q_count     = q_limit - career_q_count
         coding_q_count = 0
 
     jd_section     = (jd_text     or "No JD provided.")[:3000]
@@ -84,6 +87,7 @@ Return ONLY a valid JSON array. No markdown fences, no commentary."""
             [{"role": "user", "content": prompt}],
             max_tokens=3000,
             temperature=0.4,
+            api_key=api_key,
         )
         raw = raw.strip()
         if raw.startswith("```"):
@@ -308,7 +312,8 @@ def reset_interview_session(chat_id: str):
 
 def start_interview(
     chat_id: str, role: str, company: str, jd_text: str, resume_text: str,
-    domain: str = "it", round_type: str = "tech", weekly_career_day: int = 0
+    domain: str = "it", round_type: str = "tech", weekly_career_day: int = 0,
+    api_key: str = None
 ) -> dict:
     """Initialise a new interview session and return the first question."""
 
@@ -322,7 +327,7 @@ def start_interview(
         end_idx     = min(len(plan), current_day + 2)
         career_topics = [plan[i]["topic"] for i in range(start_idx, end_idx) if i < len(plan)]
 
-    question_bank = _generate_question_bank(role, company, jd_text, resume_text, career_topics, domain, round_type, weekly_career_day)
+    question_bank = _generate_question_bank(role, company, jd_text, resume_text, career_topics, domain, round_type, weekly_career_day, api_key=api_key)
 
     session = {
         "role":         role,
@@ -365,7 +370,7 @@ def start_interview(
     }
 
 
-def submit_answer(chat_id: str, answer: str) -> dict:
+def submit_answer(chat_id: str, answer: str, api_key: str = None) -> dict:
     """Evaluate the current answer; return feedback + next question or final report."""
 
     session = _load_interview_session(chat_id)
@@ -379,7 +384,7 @@ def submit_answer(chat_id: str, answer: str) -> dict:
     question_bank = session["question_bank"]
 
     if q_idx >= len(question_bank):
-        return _build_report(chat_id, session)
+        return _build_report(chat_id, session, api_key=api_key)
 
     current_q = question_bank[q_idx]
 
@@ -391,6 +396,7 @@ def submit_answer(chat_id: str, answer: str) -> dict:
         q_type=current_q["type"],
         answer=answer,
         hint=current_q.get("hint", ""),
+        api_key=api_key,
     )
 
     # Persist Q&A
@@ -412,7 +418,7 @@ def submit_answer(chat_id: str, answer: str) -> dict:
     if next_idx >= len(question_bank):
         session["status"] = "completed"
         _save_interview_session(chat_id, session)
-        report = _build_report(chat_id, session)
+        report = _build_report(chat_id, session, api_key=api_key)
         return {
             "status":   "feedback_and_complete",
             "feedback": feedback_data,
@@ -435,11 +441,11 @@ def submit_answer(chat_id: str, answer: str) -> dict:
     }
 
 
-def get_report(chat_id: str) -> dict:
+def get_report(chat_id: str, api_key: str = None) -> dict:
     session = _load_interview_session(chat_id)
     if not session:
         return {"status": "error", "message": "No interview session found."}
-    return _build_report(chat_id, session)
+    return _build_report(chat_id, session, api_key=api_key)
 
 
 # ── Answer evaluator ─────────────────────────────────────────
@@ -448,6 +454,7 @@ def _evaluate_answer(
     role: str, company: str,
     question: str, q_type: str,
     answer: str, hint: str,
+    api_key: str = None,
 ) -> dict:
     type_ctx = {
         "company": f"This is a company/culture fit question for {company}.",
@@ -478,6 +485,7 @@ OVERALL: <one-sentence verdict>"""
             [{"role": "user", "content": prompt}],
             max_tokens=500,
             temperature=0.15,
+            api_key=api_key,
         )
     except Exception:
         logger.exception("Answer evaluation failed")
@@ -507,7 +515,8 @@ OVERALL: <one-sentence verdict>"""
 
 # ── Report builder ────────────────────────────────────────────
 
-def _generate_overall_feedback(role: str, company: str, qa_rows: list) -> str:
+def _generate_overall_feedback(role: str, company: str, qa_rows: list, api_key: str = None) -> str:
+    """Generate overall qualitative feedback and key improvement areas."""
     """Generate overall qualitative feedback and key improvement areas."""
     qa_summary = ""
     for r in qa_rows:
@@ -531,6 +540,7 @@ IMPROVEMENT_AREAS:
             [{"role": "user", "content": prompt}],
             max_tokens=600,
             temperature=0.3,
+            api_key=api_key,
         )
         return raw.strip()
     except Exception:
@@ -538,7 +548,7 @@ IMPROVEMENT_AREAS:
         return "OVERALL_FEEDBACK: Evaluation completed.\nIMPROVEMENT_AREAS:\n- Keep practicing core concepts.\n- Build on real-world projects."
 
 
-def _build_report(chat_id: str, session: dict) -> dict:
+def _build_report(chat_id: str, session: dict, api_key: str = None) -> dict:
     qa_rows = _load_all_qa(chat_id)
     if not qa_rows:
         return {"status": "report_empty", "message": "No answers recorded yet."}
@@ -571,7 +581,7 @@ def _build_report(chat_id: str, session: dict) -> dict:
     # Generate overall qualitative report feedback if not already stored
     feedback_str = session.get("report_feedback") or ""
     if not feedback_str and session.get("status") == "completed":
-        feedback_str = _generate_overall_feedback(session["role"], session["company"], qa_rows)
+        feedback_str = _generate_overall_feedback(session["role"], session["company"], qa_rows, api_key=api_key)
         # Save it
         with get_connection() as conn:
             conn.execute(

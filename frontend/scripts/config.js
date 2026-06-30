@@ -1,9 +1,11 @@
 // Central configuration — edit BACKEND_URL to point at your Flask server.
 
 const CONFIG = Object.freeze({
-  // Set to your local Flask server when running locally.
-  // Change back to "" when deploying to Vercel.
-  BACKEND_URL: "",
+  // Automatically routes to local Flask server when testing locally via file:// or localhost,
+  // and falls back to relative paths when deployed on Vercel.
+  BACKEND_URL: (location.protocol === "file:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")
+    ? "http://127.0.0.1:5000"
+    : "",
 
   ENDPOINTS: {
     STUDY:            "/api/workspace/generate",

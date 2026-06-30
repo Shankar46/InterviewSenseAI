@@ -1,0 +1,181 @@
+---
+title: "InterviewSense AI - Project Development Summary"
+author: "Antigravity Pair Programmer & Developer"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    theme: united
+    highlight: tango
+---
+
+# Project Overview
+
+**InterviewSense AI** is a modern, responsive web application designed to prepare users for coding interviews and guide them through structured career pathways. It features:
+* An **AI Career & Study Planner** that generates daily study modules and tracks user progress.
+* A **Mock Interview Assistant** that asks tailored questions based on job descriptions and resumes, grades user answers, and produces structured feedback.
+* A **Secure IDE Sandbox** where users can write and execute code in Python, JavaScript, Java, and C++ through the Judge0 runtime environment.
+* A robust **Authentication System** with secure session-handling and token validation.
+
+---
+
+# Languages and Technologies Used
+
+The project is built on a modern full-stack architecture using the following technologies:
+
+### 1. Backend Development
+* **Python**: Serves as the primary backend language.
+* **Flask**: A lightweight WSGI web application framework routing API endpoints.
+* **SQLite3**: A serverless, self-contained relational database management engine storing application state.
+* **PBKDF2-HMAC-SHA256**: High-security cryptographic password hashing using Python's native `hashlib`.
+* **Judge0 API**: Remote sandbox API facilitating secure, real-time code executions for Python, JavaScript, C++, and Java.
+
+### 2. Frontend Development
+* **HTML5**: Provides semantic structuring of the interactive layout, sheets, forms, and logs.
+* **Vanilla CSS3**: Tailored styling using dynamic animations, harmonious color palettes, custom gradients, and media queries.
+* **Vanilla JavaScript (ES6+)**: Handles frontend states, routing, asynchronous API fetches (Bearer token authorizations), UI updates, and real-time DOM manipulations.
+
+---
+
+# Database Schema Architecture
+
+The database architecture is designed with foreign key constraints, cascading deletions, and SQLite Write-Ahead Logging (WAL) mode for performance.
+
+```sql
+-- 1. Users Table (Core Auth)
+CREATE TABLE users (
+    user_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    username        TEXT UNIQUE NOT NULL,
+    password_hash   TEXT NOT NULL,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 2. User Sessions Table (Bearer Authorization)
+CREATE TABLE user_sessions (
+    session_token   TEXT PRIMARY KEY,
+    user_id         INTEGER NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at      TEXT NOT NULL
+);
+
+-- 3. User Chats Table
+CREATE TABLE user_chats (
+    chat_id         TEXT PRIMARY KEY,
+    user_id         INTEGER NOT NULL REFERENCES users(user_id) ON DELETE CASCADE
+);
+
+-- 4. Course Sessions Table (Study Plans)
+CREATE TABLE course_sessions (
+    chat_id         TEXT PRIMARY KEY,
+    role            TEXT NOT NULL DEFAULT 'Python Developer',
+    duration_days   INTEGER NOT NULL DEFAULT 30,
+    hours_per_day   TEXT NOT NULL DEFAULT '2',
+    level           TEXT NOT NULL DEFAULT 'beginner',
+    dsa_track       TEXT NOT NULL DEFAULT 'yes',
+    current_day     INTEGER NOT NULL DEFAULT 1,
+    started         INTEGER NOT NULL DEFAULT 0,
+    awaiting_answers INTEGER NOT NULL DEFAULT 0,
+    last_quiz       TEXT NOT NULL DEFAULT '',
+    day_plan        TEXT NOT NULL DEFAULT '[]',
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 5. Progress Table (Career Milestones)
+CREATE TABLE progress (
+    chat_id         TEXT NOT NULL,
+    day             INTEGER NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'pending',
+    score           INTEGER,
+    completion_date TEXT,
+    notes           TEXT,
+    PRIMARY KEY (chat_id, day)
+);
+
+-- 6. Notifications Table
+CREATE TABLE notifications (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id         TEXT NOT NULL,
+    type            TEXT NOT NULL DEFAULT 'info',
+    title           TEXT NOT NULL,
+    body            TEXT NOT NULL DEFAULT '',
+    is_read         INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 7. Interview Sessions Table (Mock Preparation)
+CREATE TABLE interview_sessions (
+    chat_id       TEXT PRIMARY KEY,
+    role          TEXT NOT NULL DEFAULT '',
+    company       TEXT NOT NULL DEFAULT '',
+    jd_text       TEXT NOT NULL DEFAULT '',
+    resume_text   TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL DEFAULT 'active',
+    question_idx  INTEGER NOT NULL DEFAULT 0,
+    total_q       INTEGER NOT NULL DEFAULT 0,
+    question_bank TEXT NOT NULL DEFAULT '[]',
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    domain        TEXT NOT NULL DEFAULT 'it',
+    round_type    TEXT NOT NULL DEFAULT 'tech',
+    report_feedback TEXT NOT NULL DEFAULT '',
+    weekly_career_day INTEGER NOT NULL DEFAULT 0
+);
+
+-- 8. Interview Q&A Table (Performance Evaluation)
+CREATE TABLE interview_qa (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id      TEXT NOT NULL,
+    q_index      INTEGER NOT NULL,
+    question     TEXT NOT NULL,
+    q_type       TEXT NOT NULL DEFAULT 'jd',
+    user_answer  TEXT,
+    score        INTEGER,
+    feedback     TEXT,
+    strengths    TEXT,
+    gaps         TEXT,
+    model_answer TEXT,
+    asked_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (chat_id, q_index)
+);
+```
+
+---
+
+# Debugging and Refactoring Walkthrough
+
+During development, we resolved several critical database issues that block authentication flow:
+
+### 1. Database Schema Mismatch
+* **Symptom**: Triggering `/api/auth/register` failed with `sqlite3.OperationalError: table users has no column named username`. Logging in similarly failed because `user_id` was missing.
+* **Reason**: The existing local database (`interviewsense.db`) was initialized using a legacy table schema `(id, email, fullname, password, created_at)`. Because SQLite ignores `CREATE TABLE IF NOT EXISTS` if a table exists with the same name, the new fields weren't being added.
+* **How We Fixed It**: 
+  We wrote an automated self-healing schema migration inside `_migrate(conn)` in `backend/db.py`:
+  1. Detects if `username` is absent from the `users` table info.
+  2. Temporary renames the old table to `users_old`.
+  3. Renames the dependent tables (`user_sessions`, `user_chats`) to prevent SQLite from permanently breaking their foreign key references (SQLite automatically points foreign keys to renamed tables, which would leave them pointing to the defunct `users_old`).
+  4. Creates the new `users`, `user_sessions`, and `user_chats` tables using the modern schemas.
+  5. Copies existing record logs and user accounts (e.g. mapping `email` to `username` and `id` to `user_id`).
+  6. Safely drops all `_old` tables.
+
+### 2. Workspace Optimization
+* **Action**: Cleaned out obsolete build artifacts, logs (`*.log`), defunct database models (`zora.db`), text drafts, and various sandbox unit testing scripts (`test_*.py`, `quick_test.py`) to reduce bloat, optimize repository size, and enforce coding standards.
+
+---
+
+# Execution & Deployment Reference
+
+To run the full stack locally:
+
+1. **Activate the environment**:
+   ```bash
+   # Windows PowerShell
+   .\venv\Scripts\Activate.ps1
+   ```
+2. **Start the Flask Backend**:
+   ```bash
+   python -m backend.main
+   ```
+   *The migration checks and updates the schema immediately upon server startup.*
+3. **Open the Web Client**:
+   Open `frontend/index.html` directly in the browser or serve it via a live server.

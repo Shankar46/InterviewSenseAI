@@ -21,6 +21,12 @@ from backend.db import (
     init_db,
     mark_notifications_read,
     reset_awaiting_answers,
+    register_user,
+    verify_user,
+    create_user_session,
+    invalidate_user_session,
+    check_or_register_chat,
+    get_connection,
 )
 from backend.generator import generate_notes
 from backend.interview_assistant import (
@@ -30,8 +36,12 @@ from backend.interview_assistant import (
     submit_answer,
 )
 from backend.utils import extract_text, split_into_topic_blocks
+from functools import wraps
 
-load_dotenv()
+# Explicitly load .env from project root relative to this file
+_dir = os.path.dirname(os.path.abspath(__file__))
+_parent = os.path.dirname(_dir)
+load_dotenv(os.path.join(_parent, ".env"))
 
 # Normalise token env var
 if not os.getenv("HF_TOKEN") and os.getenv("HF_API_KEY"):
@@ -53,7 +63,7 @@ _origins = [
     o.strip()
     for o in os.getenv(
         "CORS_ORIGINS",
-        "http://127.0.0.1:5500,http://localhost:5500,http://127.0.0.1:5000,http://localhost:5000,null",
+        "http://127.0.0.1:5500,http://localhost:5500,http://127.0.0.1:5000,http://localhost:5000,http://127.0.0.1:8000,http://localhost:8000,null",
     ).split(",")
     if o.strip()
 ]
@@ -95,6 +105,47 @@ def _study_error(msg: str) -> tuple:
     return jsonify({"answer": msg, "progress": {}}), 500
 
 
+# ── Authentication Decorator & Helpers ────────────────────────
+
+def get_current_user():
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return None
+    token = auth_header.split(" ")[1]
+    
+    with get_connection() as conn:
+        row = conn.execute(
+            """SELECT u.user_id, u.username FROM user_sessions s
+               JOIN users u ON s.user_id = u.user_id
+               WHERE s.session_token = ? AND datetime('now') < s.expires_at""",
+            (token,)
+        ).fetchone()
+        if row:
+            return {"user_id": row["user_id"], "username": row["username"]}
+    return None
+
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        user = get_current_user()
+        if not user:
+            return jsonify({"status": "error", "message": "Unauthorized"}), 401
+        request.user = user
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+def check_chat_auth(chat_id):
+    if not chat_id or chat_id == "default":
+        # Allow default fallback but register it under the user to prevent cross-talk.
+        # Wait, if we enforce unique session per user, we map it.
+        pass
+    if not check_or_register_chat(chat_id, request.user["user_id"]):
+        return jsonify({"status": "error", "message": "Forbidden: You do not own this session."}), 403
+    return None
+
+
 # ── Route handler ─────────────────────────────────────────────
 
 def _handle_request(req) -> object:
@@ -103,8 +154,15 @@ def _handle_request(req) -> object:
     task          = req.form.get("task_type", "notes").strip().lower() or "notes"
     assistant     = req.form.get("assistant_type", "study").strip().lower() or "study"
     chat_id       = req.form.get("chat_id", "default").strip() or "default"
+    
+    # Ownership Check
+    err = check_chat_auth(chat_id)
+    if err:
+        return err
+
     history       = _parse_field(req.form.get("history"), [])
     career_config = _parse_field(req.form.get("career_config"), {})
+    api_key       = req.headers.get("X-HF-API-Key") or None
 
     # ── Career path ───────────────────────────────────────────
     if assistant == "career":
@@ -113,6 +171,7 @@ def _handle_request(req) -> object:
             history=history,
             career_config=career_config,
             chat_id=chat_id,
+            api_key=api_key,
         )
         if isinstance(result, dict):
             return jsonify(result)
@@ -154,6 +213,7 @@ def _handle_request(req) -> object:
                 task=task,
                 chat_history=[],
                 file_text=block["content"][:1200],
+                api_key=api_key,
             )
             return jsonify(_study_response(f"## {block['title']}\n\n{answer}"))
 
@@ -164,6 +224,7 @@ def _handle_request(req) -> object:
         task=task,
         chat_history=history,
         file_text=file_text[:1200] if file_text else "",
+        api_key=api_key,
     )
     return jsonify(_study_response(answer))
 
@@ -178,9 +239,68 @@ def _is_doc_wide_request(topic: str) -> bool:
     return not topic or any(kw in t for kw in keywords)
 
 
+# ── Auth Routes ──────────────────────────────────────────────
+
+@app.route("/api/auth/register", methods=["POST"])
+def auth_register():
+    username = request.form.get("username", "").strip()
+    password = request.form.get("password", "").strip()
+    if not username or not password:
+        return jsonify({"status": "error", "message": "Username and password are required."}), 400
+    if len(username) < 3:
+        return jsonify({"status": "error", "message": "Username must be at least 3 characters."}), 400
+    if len(password) < 6:
+        return jsonify({"status": "error", "message": "Password must be at least 6 characters."}), 400
+        
+    user_id = register_user(username, password)
+    if user_id is None:
+        return jsonify({"status": "error", "message": "Username already exists."}), 400
+        
+    return jsonify({"status": "ok", "message": "Registration successful. Please log in."})
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def auth_login():
+    username = request.form.get("username", "").strip()
+    password = request.form.get("password", "").strip()
+    if not username or not password:
+        return jsonify({"status": "error", "message": "Username and password are required."}), 400
+        
+    user = verify_user(username, password)
+    if not user:
+        return jsonify({"status": "error", "message": "Invalid username or password."}), 401
+        
+    token = create_user_session(user["user_id"])
+    return jsonify({
+        "status": "ok",
+        "token": token,
+        "username": user["username"]
+    })
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+@login_required
+def auth_logout():
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ")[1]
+        invalidate_user_session(token)
+    return jsonify({"status": "ok", "message": "Logged out successfully."})
+
+
+@app.route("/api/auth/me", methods=["GET"])
+@login_required
+def auth_me():
+    return jsonify({
+        "status": "ok",
+        "username": request.user["username"]
+    })
+
+
 # ── Routes ───────────────────────────────────────────────────
 
 @app.route("/api/workspace/generate", methods=["POST"])
+@login_required
 def workspace_endpoint():
     try:
         return _handle_request(request)
@@ -190,6 +310,7 @@ def workspace_endpoint():
 
 
 @app.route("/api/edtech/generate", methods=["POST"])
+@login_required
 def edtech_endpoint():
     try:
         return _handle_request(request)
@@ -199,6 +320,7 @@ def edtech_endpoint():
 
 
 @app.route("/generate", methods=["POST"])
+@login_required
 def legacy_endpoint():
     """Legacy route — kept for backwards compatibility."""
     try:
@@ -209,10 +331,14 @@ def legacy_endpoint():
 
 
 @app.route("/api/edtech/reset", methods=["POST"])
+@login_required
 def reset_endpoint():
     """Clear awaiting_answers flag without deleting session data."""
     try:
         chat_id = request.form.get("chat_id", "default").strip() or "default"
+        err = check_chat_auth(chat_id)
+        if err:
+            return err
         reset_awaiting_answers(chat_id)
         return jsonify({"status": "ok", "message": "Session flags reset."})
     except Exception:
@@ -221,12 +347,16 @@ def reset_endpoint():
 
 
 @app.route("/api/edtech/delete", methods=["POST"])
+@login_required
 def delete_session_endpoint():
     """Fully wipe a session and its progress from the DB."""
     try:
         chat_id = request.form.get("chat_id", "").strip()
         if not chat_id:
             return jsonify({"status": "error", "message": "chat_id required"}), 400
+        err = check_chat_auth(chat_id)
+        if err:
+            return err
         delete_session(chat_id)
         return jsonify({"status": "ok", "message": "Session deleted."})
     except Exception:
@@ -235,10 +365,14 @@ def delete_session_endpoint():
 
 
 @app.route("/api/edtech/stats", methods=["GET"])
+@login_required
 def stats_endpoint():
     """Return progress stats and streak for a chat session."""
     try:
         chat_id = request.args.get("chat_id", "default").strip() or "default"
+        err = check_chat_auth(chat_id)
+        if err:
+            return err
         stats = get_progress_stats(chat_id)
         streak = get_streak(chat_id)
         return jsonify({"status": "ok", "stats": stats, "streak": streak})
@@ -248,10 +382,14 @@ def stats_endpoint():
 
 
 @app.route("/api/notifications", methods=["GET"])
+@login_required
 def notifications_endpoint():
     """Return unread notifications for a session."""
     try:
         chat_id = request.args.get("chat_id", "default").strip() or "default"
+        err = check_chat_auth(chat_id)
+        if err:
+            return err
         notifs = get_unread_notifications(chat_id)
         return jsonify({"status": "ok", "notifications": notifs, "count": len(notifs)})
     except Exception:
@@ -260,10 +398,14 @@ def notifications_endpoint():
 
 
 @app.route("/api/notifications/read", methods=["POST"])
+@login_required
 def mark_read_endpoint():
     """Mark all notifications as read for a session."""
     try:
         chat_id = request.form.get("chat_id", "default").strip() or "default"
+        err = check_chat_auth(chat_id)
+        if err:
+            return err
         mark_notifications_read(chat_id)
         return jsonify({"status": "ok"})
     except Exception:
@@ -279,10 +421,14 @@ def health_endpoint():
 # ── Interview routes ─────────────────────────────────────────
 
 @app.route("/api/interview/start", methods=["POST"])
+@login_required
 def interview_start_endpoint():
     """Initialise a mock interview session and return the first question."""
     try:
         chat_id     = request.form.get("chat_id", "default").strip() or "default"
+        err = check_chat_auth(chat_id)
+        if err:
+            return err
         role        = request.form.get("role", "Software Engineer").strip()
         company     = request.form.get("company", "the company").strip()
         jd_text     = request.form.get("jd_text", "").strip()
@@ -299,7 +445,8 @@ def interview_start_endpoint():
         if resume_file and resume_file.filename:
             resume_text = extract_text(resume_file)[:3000] or resume_text
 
-        result = start_interview(chat_id, role, company, jd_text, resume_text, domain, round_type, weekly_career_day)
+        api_key = request.headers.get("X-HF-API-Key") or None
+        result = start_interview(chat_id, role, company, jd_text, resume_text, domain, round_type, weekly_career_day, api_key=api_key)
         return jsonify(result)
     except Exception:
         logger.exception("Interview start failed.")
@@ -307,12 +454,17 @@ def interview_start_endpoint():
 
 
 @app.route("/api/interview/answer", methods=["POST"])
+@login_required
 def interview_answer_endpoint():
     """Evaluate a candidate's answer and return feedback + next question or report."""
     try:
         chat_id = request.form.get("chat_id", "default").strip() or "default"
+        err = check_chat_auth(chat_id)
+        if err:
+            return err
         answer  = request.form.get("answer", "").strip()
-        result  = submit_answer(chat_id, answer)
+        api_key = request.headers.get("X-HF-API-Key") or None
+        result  = submit_answer(chat_id, answer, api_key=api_key)
         return jsonify(result)
     except Exception:
         logger.exception("Interview answer evaluation failed.")
@@ -320,11 +472,16 @@ def interview_answer_endpoint():
 
 
 @app.route("/api/interview/report", methods=["GET"])
+@login_required
 def interview_report_endpoint():
     """Return the final interview report card."""
     try:
         chat_id = request.args.get("chat_id", "default").strip() or "default"
-        result  = get_interview_report(chat_id)
+        err = check_chat_auth(chat_id)
+        if err:
+            return err
+        api_key = request.headers.get("X-HF-API-Key") or None
+        result  = get_interview_report(chat_id, api_key=api_key)
         return jsonify(result)
     except Exception:
         logger.exception("Interview report fetch failed.")
@@ -332,11 +489,15 @@ def interview_report_endpoint():
 
 
 @app.route("/api/interview/reset", methods=["POST"])
+@login_required
 def interview_reset_endpoint():
     """Wipe the interview session so the user can start fresh."""
     try:
         chat_id = request.form.get("chat_id", "").strip()
         if chat_id:
+            err = check_chat_auth(chat_id)
+            if err:
+                return err
             reset_interview_session(chat_id)
         return jsonify({"status": "ok"})
     except Exception:
@@ -345,10 +506,11 @@ def interview_reset_endpoint():
 
 
 @app.route("/api/ide/run", methods=["POST"])
+@login_required
 def ide_run_endpoint():
-    """Execute python, javascript, java, or cpp code safely using local runtimes."""
-    import subprocess
-    import tempfile
+    """Execute python, javascript, java, or cpp code safely using a remote sandboxed Judge0 API runtime."""
+    import requests
+    import re
     try:
         language = request.form.get("language", "python").strip().lower()
         code     = request.form.get("code", "").strip()
@@ -356,139 +518,57 @@ def ide_run_endpoint():
         if not code:
             return jsonify({"output": "No code provided."})
 
-        if language == "python":
-            with tempfile.NamedTemporaryFile(suffix=".py", delete=False, mode="w", encoding="utf-8") as f:
-                f.write(code)
-                temp_name = f.name
-            try:
-                res = subprocess.run(
-                    [sys.executable, temp_name],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-                output = res.stdout + res.stderr
-                if not output:
-                    output = "Code executed successfully with no output."
-            except subprocess.TimeoutExpired:
-                output = "Error: Code execution timed out (5 seconds limit)."
-            except Exception as e:
-                output = f"Execution Error: {str(e)}"
-            finally:
-                try:
-                    os.remove(temp_name)
-                except Exception:
-                    pass
+        # Preprocess Java code so public class matches Main (compiles inside Main.java in Judge0)
+        if language == "java":
+            code = re.sub(r"public\s+class\s+\w+", "public class Main", code)
 
-        elif language == "javascript":
-            with tempfile.NamedTemporaryFile(suffix=".js", delete=False, mode="w", encoding="utf-8") as f:
-                f.write(code)
-                temp_name = f.name
-            try:
-                res = subprocess.run(
-                    ["node", temp_name],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-                output = res.stdout + res.stderr
-                if not output:
-                    output = "Code executed successfully with no output."
-            except FileNotFoundError:
-                output = "Error: Node.js runtime not found. Please ensure Node.js is installed and added to your system PATH."
-            except subprocess.TimeoutExpired:
-                output = "Error: Code execution timed out (5 seconds limit)."
-            except Exception as e:
-                output = f"Execution Error: {str(e)}"
-            finally:
-                try:
-                    os.remove(temp_name)
-                except Exception:
-                    pass
+        lang_id_map = {
+            "python": 100,
+            "javascript": 102,
+            "js": 102,
+            "java": 91,
+            "cpp": 105,
+            "c++": 105
+        }
 
-        elif language == "java":
-            import re
-            import shutil
-            match = re.search(r"public\s+class\s+(\w+)", code)
-            class_name = match.group(1) if match else "Solution"
-            
-            temp_dir = tempfile.mkdtemp()
-            temp_name = os.path.join(temp_dir, f"{class_name}.java")
-            with open(temp_name, "w", encoding="utf-8") as f:
-                f.write(code)
-            try:
-                comp_res = subprocess.run(
-                    ["javac", temp_name],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-                if comp_res.returncode != 0:
-                    output = "Compilation Error:\n" + comp_res.stderr
+        lang_id = lang_id_map.get(language)
+        if not lang_id:
+            return jsonify({"output": f"Language '{language}' execution is not supported in the secure sandbox."})
+
+        url = "https://ce.judge0.com/submissions?wait=true"
+        payload = {
+            "source_code": code,
+            "language_id": lang_id
+        }
+
+        try:
+            r = requests.post(url, json=payload, timeout=15)
+            if r.status_code in (200, 201):
+                res = r.json()
+                status = res.get("status", {})
+                status_id = status.get("id")
+                status_desc = status.get("description", "Unknown Status")
+
+                stdout = res.get("stdout") or ""
+                stderr = res.get("stderr") or ""
+                compile_output = res.get("compile_output") or ""
+
+                if status_id == 6: # Compilation Error
+                    output = f"Compilation Error:\n{compile_output}"
+                elif status_id == 5: # Time Limit Exceeded
+                    output = "Error: Code execution timed out (Time Limit Exceeded in sandbox)."
                 else:
-                    run_res = subprocess.run(
-                        ["java", "-cp", temp_dir, class_name],
-                        capture_output=True,
-                        text=True,
-                        timeout=5
-                    )
-                    output = run_res.stdout + run_res.stderr
+                    output = stdout
+                    if stderr:
+                        output += f"\nRuntime Error:\n{stderr}"
                     if not output:
-                        output = "Code executed successfully with no output."
-            except FileNotFoundError:
-                output = "Error: Java JDK (javac/java) compiler/runtime not found on host machine."
-            except subprocess.TimeoutExpired:
-                output = "Error: Code execution timed out (5 seconds limit)."
-            except Exception as e:
-                output = f"Execution Error: {str(e)}"
-            finally:
-                try:
-                    shutil.rmtree(temp_dir)
-                except Exception:
-                    pass
-
-        elif language in ("cpp", "c++"):
-            with tempfile.NamedTemporaryFile(suffix=".cpp", delete=False, mode="w", encoding="utf-8") as f:
-                f.write(code)
-                temp_name = f.name
-            exe_name = temp_name + ".exe"
-            try:
-                comp_res = subprocess.run(
-                    ["g++", temp_name, "-o", exe_name],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-                if comp_res.returncode != 0:
-                    output = "Compilation Error:\n" + comp_res.stderr
-                else:
-                    run_res = subprocess.run(
-                        [exe_name],
-                        capture_output=True,
-                        text=True,
-                        timeout=5
-                    )
-                    output = run_res.stdout + run_res.stderr
-                    if not output:
-                        output = "Code executed successfully with no output."
-            except FileNotFoundError:
-                output = "Error: GNU C++ Compiler (g++) not found on host machine."
-            except subprocess.TimeoutExpired:
-                output = "Error: Code execution timed out (5 seconds limit)."
-            except Exception as e:
-                output = f"Execution Error: {str(e)}"
-            finally:
-                try:
-                    os.remove(temp_name)
-                except Exception:
-                    pass
-                try:
-                    os.remove(exe_name)
-                except Exception:
-                    pass
-
-        else:
-            output = f"Language '{language}' execution is not supported locally. Use 'Copy to Chat' to write code as your answer."
+                        output = f"Code executed successfully with status '{status_desc}' and no output."
+            else:
+                output = f"Sandbox API Error: Server returned status code {r.status_code}."
+        except requests.Timeout:
+            output = "Error: Sandbox request timed out (15 seconds limit)."
+        except Exception as e:
+            output = f"Execution Sandbox Error: Unable to complete code run request ({str(e)})."
 
         return jsonify({"output": output})
     except Exception as e:

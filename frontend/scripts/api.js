@@ -12,7 +12,29 @@ const Api = (() => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), options.timeout || REQUEST_TIMEOUT_MS);
     
+    if (!options.headers) {
+      options.headers = {};
+    }
+
+    const userApiKey = localStorage.getItem("user_hf_api_key");
+    if (userApiKey) {
+      options.headers["X-HF-API-Key"] = userApiKey.trim();
+    }
+
+    // Attach Bearer token
+    const token = localStorage.getItem("isai_auth_token");
+    if (token) {
+      options.headers["Authorization"] = "Bearer " + token;
+    }
+    
     return fetch(url, { ...options, signal: controller.signal })
+      .then(res => {
+        if (res.status === 401) {
+          Auth.logout();
+          throw new Error("Session expired. Please log in again.");
+        }
+        return res;
+      })
       .catch(err => {
         if (err.name === "AbortError") {
           throw new Error("Request timed out. The roadmap is still generating, please try again.");

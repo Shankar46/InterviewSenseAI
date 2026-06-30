@@ -9,10 +9,13 @@ from huggingface_hub import InferenceClient
 
 from backend.prompts import get_prompt
 
-load_dotenv()
+# Explicitly load .env from project root relative to this file
+_dir = os.path.dirname(os.path.abspath(__file__))
+_parent = os.path.dirname(_dir)
+load_dotenv(os.path.join(_parent, ".env"))
 logger = logging.getLogger(__name__)
 
-ACTIVE_MODEL = "Qwen/Qwen2.5-72B-Instruct"
+ACTIVE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 MAX_HISTORY_TURNS = 4
 MAX_CONTENT_CHARS = 4000
 
@@ -25,13 +28,16 @@ _SMALL_TALK = {
 _client: InferenceClient | None = None
 
 
-def _get_client() -> InferenceClient:
+def _get_client(api_key: str = None) -> InferenceClient:
+    if api_key:
+        return InferenceClient(api_key=api_key)
     global _client
     if _client is None:
-        api_key = os.getenv("HF_TOKEN") or os.getenv("HF_API_KEY")
-        if not api_key:
+        env_key = os.getenv("HF_TOKEN") or os.getenv("HF_API_KEY")
+        logger.info("Resolving client token from env. Found: %s", env_key[:10] if env_key else None)
+        if not env_key:
             raise EnvironmentError("No Hugging Face API key found. Set HF_TOKEN or HF_API_KEY.")
-        _client = InferenceClient(provider="auto", api_key=api_key)
+        _client = InferenceClient(api_key=env_key)
     return _client
 
 
@@ -60,9 +66,9 @@ def _small_talk_reply(text: str) -> str | None:
     return _SMALL_TALK.get(normalised)
 
 
-def run_completion(messages: list, max_tokens: int = 1800, temperature: float = 0.3) -> str:
+def run_completion(messages: list, max_tokens: int = 1800, temperature: float = 0.3, api_key: str = None) -> str:
     """Low-level wrapper — raises on API errors so callers can handle them."""
-    client = _get_client()
+    client = _get_client(api_key)
     response = client.chat_completion(
         model=ACTIVE_MODEL,
         messages=messages,
@@ -78,6 +84,7 @@ def generate_notes(
     task: str = "notes",
     chat_history: list = None,
     file_text: str = "",
+    api_key: str = None,
 ) -> str:
     """
     Main entry point for the Study workspace.
@@ -109,7 +116,7 @@ def generate_notes(
     messages = [system_msg] + history + [{"role": "user", "content": prompt}]
 
     try:
-        return run_completion(messages)
+        return run_completion(messages, api_key=api_key)
     except EnvironmentError as e:
         logger.error("API key not configured: %s", e)
         return "⚠️ The AI provider token is not configured on the server. Please set HF_TOKEN."
@@ -118,7 +125,7 @@ def generate_notes(
         return "⚠️ Generation service temporarily unavailable. Please try again in a moment."
 
 
-def evaluate_quiz_answer(topic: str, user_answer: str) -> tuple[str, bool, int]:
+def evaluate_quiz_answer(topic: str, user_answer: str, api_key: str = None) -> tuple[str, bool, int]:
     """
     Evaluates a quiz answer against the given topic.
     Returns (evaluation_text, passed: bool, score: int).
@@ -138,6 +145,7 @@ def evaluate_quiz_answer(topic: str, user_answer: str) -> tuple[str, bool, int]:
             [{"role": "user", "content": prompt}],
             max_tokens=300,
             temperature=0.1,
+            api_key=api_key,
         )
     except Exception:
         logger.exception("Quiz evaluation failed.")

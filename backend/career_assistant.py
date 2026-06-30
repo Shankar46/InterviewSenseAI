@@ -72,7 +72,7 @@ def _normalize_plan(raw: list, role: str, duration_days: int) -> list:
     return result
 
 
-def _generate_plan(role: str, level: str, duration_days: int, dsa_track: bool) -> list:
+def _generate_plan(role: str, level: str, duration_days: int, dsa_track: bool, api_key: str = None) -> list:
     dsa_note = "Include dedicated DSA problem-solving days (arrays, trees, graphs, DP) woven throughout." if dsa_track else ""
 
     prompt = f"""You are a senior technical interviewer and curriculum designer.
@@ -99,6 +99,7 @@ Return raw JSON only. No markdown fences, no commentary."""
             [{"role": "user", "content": prompt}],
             max_tokens=4000,
             temperature=0.35,
+            api_key=api_key,
         )
         # Strip markdown fences if model ignores instructions
         raw = raw.strip()
@@ -198,6 +199,7 @@ def generate_career_plan(
     history: list = None,
     career_config: dict = None,
     chat_id: str = "default",
+    api_key: str = None,
 ) -> dict:
     career_config = career_config or {}
     cleaned = (user_input or "").strip().lower()
@@ -209,7 +211,7 @@ def generate_career_plan(
             # New session - return empty tracker for frontend to wait
             return {"text": "", "tracker": _default_tracker(career_config)}
         if not state["day_plan"]:
-            state["day_plan"] = _generate_plan(state["role"], state["level"], state["duration_days"], state["dsa_track"])
+            state["day_plan"] = _generate_plan(state["role"], state["level"], state["duration_days"], state["dsa_track"], api_key=api_key)
             save_session_state(chat_id, state)
         
         # Always return the roadmap text for refresh
@@ -233,7 +235,7 @@ def generate_career_plan(
             candidate = user_input.strip()
             if 3 <= len(candidate) <= 120:
                 state["role"] = candidate
-        state["day_plan"] = _generate_plan(state["role"], state["level"], state["duration_days"], state["dsa_track"])
+        state["day_plan"] = _generate_plan(state["role"], state["level"], state["duration_days"], state["dsa_track"], api_key=api_key)
         save_session_state(chat_id, state)
         push_notification(chat_id, "info", "Roadmap created!", f"Your {state['duration_days']}-day {state['role']} plan is ready.")
         return {
@@ -243,12 +245,12 @@ def generate_career_plan(
 
     # Ensure plan exists (recovery path)
     if not state["day_plan"]:
-        state["day_plan"] = _generate_plan(state["role"], state["level"], state["duration_days"], state["dsa_track"])
+        state["day_plan"] = _generate_plan(state["role"], state["level"], state["duration_days"], state["dsa_track"], api_key=api_key)
         save_session_state(chat_id, state)
 
     # ── Awaiting quiz answers ─────────────────────────────────
     if state["awaiting_answers"]:
-        return _handle_quiz_answer(user_input, cleaned, state, chat_id)
+        return _handle_quiz_answer(user_input, cleaned, state, chat_id, api_key=api_key)
 
     # ── Skip day ──────────────────────────────────────────────
     if any(hint in cleaned for hint in SKIP_HINTS):
@@ -278,12 +280,12 @@ def generate_career_plan(
 
 # ── Sub-handlers ─────────────────────────────────────────────
 
-def _handle_quiz_answer(user_input: str, cleaned: str, state: dict, chat_id: str) -> dict:
+def _handle_quiz_answer(user_input: str, cleaned: str, state: dict, chat_id: str, api_key: str = None) -> dict:
     plan = state["day_plan"]
     idx = state["current_day"] - 1
     topic = plan[idx]["topic"] if idx < len(plan) else "Core Engineering Concepts"
 
-    evaluation, passed, score = evaluate_quiz_answer(topic, user_input)
+    evaluation, passed, score = evaluate_quiz_answer(topic, user_input, api_key=api_key)
 
     status = "completed" if passed else "failed"
     log_day_completion(chat_id, state["current_day"], status, _today(), score=score)
