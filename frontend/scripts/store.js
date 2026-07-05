@@ -9,9 +9,15 @@ const Store = (() => {
   let chats = {};           // { [chatId]: { title, mode, messages, attachmentName } }
   let currentChatId = null;
 
+  function _getStoreKey() {
+    const user = localStorage.getItem("isai_auth_username");
+    return user ? `${LS_KEY}:${user}` : `${LS_KEY}:guest`;
+  }
+
   // ── Persistence ──────────────────────────────────────────
   function _save() {
     try {
+      const key = _getStoreKey();
       // We cannot serialise File objects — strip them down to names only
       const serialisable = {};
       Object.keys(chats).forEach(id => {
@@ -23,7 +29,7 @@ const Store = (() => {
           attachmentName: c.attachment ? c.attachment.name : (c.attachmentName || null),
         };
       });
-      localStorage.setItem(LS_KEY, JSON.stringify({ chats: serialisable, currentChatId }));
+      localStorage.setItem(key, JSON.stringify({ chats: serialisable, currentChatId }));
     } catch (e) {
       console.warn("[Store] localStorage save failed:", e);
     }
@@ -31,7 +37,8 @@ const Store = (() => {
 
   function _load() {
     try {
-      const raw = localStorage.getItem(LS_KEY);
+      const key = _getStoreKey();
+      const raw = localStorage.getItem(key);
       if (!raw) return;
       const data = JSON.parse(raw);
       if (data && data.chats) {
@@ -189,10 +196,16 @@ const Store = (() => {
       if (chats[chatId]) { chats[chatId].messages = []; _save(); }
     },
 
+    rehydrate() {
+      chats = {};
+      currentChatId = null;
+      _load();
+    },
+
     clearAll() {
       chats = {};
       currentChatId = null;
-      try { localStorage.removeItem(LS_KEY); } catch {}
+      try { localStorage.removeItem(_getStoreKey()); } catch {}
     },
   };
 })();

@@ -4,6 +4,8 @@ import logging
 import sqlite3
 import hashlib
 import secrets
+import queue
+import threading
 from contextlib import contextmanager
 
 if os.environ.get("VERCEL"):
@@ -12,13 +14,59 @@ else:
     DB_NAME = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "interviewsense.db")
 logger = logging.getLogger(__name__)
 
+# ── Connection pool ──────────────────────────────────────────
+# SQLite has no real server-side pooling, but opening a fresh connection on
+# every request (the old behaviour) costs real syscall + PRAGMA setup time
+# per call. A small pool of pre-configured, reusable connections cuts that
+# overhead and avoids "database is locked" thrashing under concurrent load.
+# NOTE: if you outgrow single-writer SQLite (high write concurrency across
+# many processes/instances), migrate to Postgres — see comment at bottom.
+
+_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "8"))
+_pool: "queue.Queue[sqlite3.Connection]" = queue.Queue(maxsize=_POOL_SIZE)
+_pool_lock = threading.Lock()
+_pool_initialized = False
+
+
+def _new_connection() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_NAME, timeout=30, check_same_thread=False)
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")       # readers don't block writers
+    conn.execute("PRAGMA synchronous = NORMAL")     # safe with WAL, much faster than FULL
+    conn.execute("PRAGMA busy_timeout = 30000")     # wait instead of erroring under contention
+    conn.execute("PRAGMA cache_size = -8000")       # ~8MB page cache per connection
+    conn.execute("PRAGMA temp_store = MEMORY")
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _ensure_pool():
+    global _pool_initialized
+    if _pool_initialized:
+        return
+    with _pool_lock:
+        if _pool_initialized:
+            return
+        for _ in range(_POOL_SIZE):
+            _pool.put(_new_connection())
+        _pool_initialized = True
+        logger.info("DB pool initialised with %d connections", _POOL_SIZE)
+
 
 @contextmanager
 def get_connection():
-    conn = sqlite3.connect(DB_NAME, timeout=15, check_same_thread=False)
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA journal_mode = WAL")
-    conn.row_factory = sqlite3.Row
+    _ensure_pool()
+    try:
+        conn = _pool.get(timeout=10)
+    except queue.Empty:
+        # Pool exhausted under heavy load — open a temporary overflow connection
+        # rather than hard-failing the request.
+        logger.warning("DB pool exhausted, opening overflow connection")
+        conn = _new_connection()
+        overflow = True
+    else:
+        overflow = False
+
     try:
         yield conn
         conn.commit()
@@ -26,7 +74,10 @@ def get_connection():
         conn.rollback()
         raise
     finally:
-        conn.close()
+        if overflow:
+            conn.close()
+        else:
+            _pool.put(conn)
 
 
 def _safe_json_list(raw: str) -> list:
@@ -130,6 +181,20 @@ def init_db():
 
         # Safely add any missing columns for older databases
         _migrate(conn)
+
+        # ── Indexes ──────────────────────────────────────────
+        # The original schema relied on primary keys only. Every lookup by
+        # chat_id (progress, notifications, interview_qa) or by session
+        # token / user_id was a full table scan once tables grow past a
+        # few thousand rows. These are the queries actually used above.
+        conn.executescript("""
+            CREATE INDEX IF NOT EXISTS idx_sessions_user      ON user_sessions(user_id);
+            CREATE INDEX IF NOT EXISTS idx_sessions_expires   ON user_sessions(expires_at);
+            CREATE INDEX IF NOT EXISTS idx_chats_user         ON user_chats(user_id);
+            CREATE INDEX IF NOT EXISTS idx_progress_chat      ON progress(chat_id);
+            CREATE INDEX IF NOT EXISTS idx_notifications_chat ON notifications(chat_id, is_read);
+            CREATE INDEX IF NOT EXISTS idx_interview_qa_chat  ON interview_qa(chat_id);
+        """)
     try:
         from backend.interview_assistant import init_interview_db
         init_interview_db()
@@ -469,6 +534,16 @@ def create_user_session(user_id: int) -> str:
 def invalidate_user_session(token: str):
     with get_connection() as conn:
         conn.execute("DELETE FROM user_sessions WHERE session_token = ?", (token,))
+
+
+def cleanup_expired_sessions():
+    """Purge expired session tokens. Call this periodically (e.g. from a
+    scheduled job or lazily on a fraction of login attempts) so the
+    user_sessions table doesn't grow unbounded under sustained traffic."""
+    with get_connection() as conn:
+        cur = conn.execute("DELETE FROM user_sessions WHERE datetime('now') >= expires_at")
+        if cur.rowcount:
+            logger.info("Purged %d expired sessions", cur.rowcount)
 
 
 def check_or_register_chat(chat_id: str, user_id: int) -> bool:

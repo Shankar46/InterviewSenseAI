@@ -27,6 +27,7 @@ from backend.db import (
     invalidate_user_session,
     check_or_register_chat,
     get_connection,
+    cleanup_expired_sessions,
 )
 from backend.generator import generate_notes
 from backend.interview_assistant import (
@@ -36,6 +37,7 @@ from backend.interview_assistant import (
     submit_answer,
 )
 from backend.utils import extract_text, split_into_topic_blocks
+from backend.rate_limit import rate_limit, periodic_cleanup
 from functools import wraps
 
 # Explicitly load .env from project root relative to this file
@@ -71,9 +73,57 @@ CORS(app, resources={r"/api/*": {"origins": _origins}, r"/generate": {"origins":
 
 # ── DB init ──────────────────────────────────────────────────
 init_db()
+periodic_cleanup()  # rate-limiter housekeeping thread
 
-# In-memory PDF session cache: {chat_id: [{"title": ..., "content": ...}]}
-_pdf_cache: dict[str, list] = {}
+# Lazily purge expired sessions on a timer rather than on every login,
+# so we don't add latency to the hot auth path.
+import threading as _threading
+def _session_gc_loop():
+    import time
+    while True:
+        time.sleep(1800)
+        try:
+            cleanup_expired_sessions()
+        except Exception:
+            logger.exception("Session cleanup failed")
+_threading.Thread(target=_session_gc_loop, daemon=True).start()
+
+# In-memory PDF session cache: {chat_id: (expires_at, [{"title":..., "content":...}])}
+# NOTE: this is process-local. If you run multiple gunicorn worker processes
+# (recommended below), a user's PDF index lookup can land on a different
+# worker than the one that cached it, producing "topic not found" errors.
+# Two ways to fix that:
+#   (a) run with --workers 1 --threads N (one process, many threads) — simplest,
+#       fine up to moderate concurrency since the bottleneck is the LLM call,
+#       not Python CPU time; or
+#   (b) move this cache to Redis/SQLite, keyed by chat_id, with the same TTL.
+# Default deployment below uses (a) for simplicity; switch to (b) if you need
+# multiple processes for true multi-core scaling.
+import time as _time
+_pdf_cache: dict[str, tuple[float, list]] = {}
+_PDF_CACHE_TTL = 3600
+_pdf_cache_lock = _threading.Lock()
+
+
+def _pdf_cache_set(chat_id: str, blocks: list):
+    with _pdf_cache_lock:
+        _pdf_cache[chat_id] = (_time.time() + _PDF_CACHE_TTL, blocks)
+        if len(_pdf_cache) > 500:  # bound memory under sustained traffic
+            now = _time.time()
+            for k in [k for k, (exp, _) in _pdf_cache.items() if exp < now]:
+                del _pdf_cache[k]
+
+
+def _pdf_cache_get(chat_id: str):
+    with _pdf_cache_lock:
+        entry = _pdf_cache.get(chat_id)
+        if not entry:
+            return None
+        expires_at, blocks = entry
+        if _time.time() >= expires_at:
+            del _pdf_cache[chat_id]
+            return None
+        return blocks
 
 
 # ── Helpers ──────────────────────────────────────────────────
@@ -137,13 +187,15 @@ def login_required(f):
 
 
 def check_chat_auth(chat_id):
+    user_id = request.user["user_id"]
+    logger.info("check_chat_auth: checking chat_id=%r for user_id=%d", chat_id, user_id)
     if not chat_id or chat_id == "default":
-        # Allow default fallback but register it under the user to prevent cross-talk.
-        # Wait, if we enforce unique session per user, we map it.
         pass
-    if not check_or_register_chat(chat_id, request.user["user_id"]):
+    if not check_or_register_chat(chat_id, user_id):
+        logger.warning("check_chat_auth FORBIDDEN: chat_id=%r is not owned by user_id=%d", chat_id, user_id)
         return jsonify({"status": "error", "message": "Forbidden: You do not own this session."}), 403
     return None
+
 
 
 # ── Route handler ─────────────────────────────────────────────
@@ -189,7 +241,7 @@ def _handle_request(req) -> object:
             blocks = split_into_topic_blocks(file_text)
             if not blocks:
                 blocks = [{"title": "Document Overview", "content": file_text[:2000]}]
-            _pdf_cache[chat_id] = blocks
+            _pdf_cache_set(chat_id, blocks)
             index_lines = "\n".join(f"{i+1}. {b['title']}" for i, b in enumerate(blocks))
             return jsonify(_study_response(
                 f"### Document Topics Extracted\n\n{index_lines}\n\n"
@@ -197,9 +249,9 @@ def _handle_request(req) -> object:
             ))
 
     # Numeric input = user picking a topic from the PDF index
-    if topic.isdigit() and chat_id in _pdf_cache:
+    if topic.isdigit() and _pdf_cache_get(chat_id):
         idx = int(topic) - 1
-        blocks = _pdf_cache[chat_id]
+        blocks = _pdf_cache_get(chat_id)
         if 0 <= idx < len(blocks):
             block = blocks[idx]
             query = (
@@ -242,6 +294,7 @@ def _is_doc_wide_request(topic: str) -> bool:
 # ── Auth Routes ──────────────────────────────────────────────
 
 @app.route("/api/auth/register", methods=["POST"])
+@rate_limit(5, 300, scope="register")
 def auth_register():
     username = request.form.get("username", "").strip()
     password = request.form.get("password", "").strip()
@@ -260,6 +313,7 @@ def auth_register():
 
 
 @app.route("/api/auth/login", methods=["POST"])
+@rate_limit(8, 60, scope="login")
 def auth_login():
     username = request.form.get("username", "").strip()
     password = request.form.get("password", "").strip()
@@ -301,6 +355,7 @@ def auth_me():
 
 @app.route("/api/workspace/generate", methods=["POST"])
 @login_required
+@rate_limit(20, 60, scope="generate")
 def workspace_endpoint():
     try:
         return _handle_request(request)
@@ -311,6 +366,7 @@ def workspace_endpoint():
 
 @app.route("/api/edtech/generate", methods=["POST"])
 @login_required
+@rate_limit(20, 60, scope="generate")
 def edtech_endpoint():
     try:
         return _handle_request(request)
@@ -507,6 +563,7 @@ def interview_reset_endpoint():
 
 @app.route("/api/ide/run", methods=["POST"])
 @login_required
+@rate_limit(10, 60, scope="ide")
 def ide_run_endpoint():
     """Execute python, javascript, java, or cpp code safely using a remote sandboxed Judge0 API runtime."""
     import requests
@@ -574,6 +631,40 @@ def ide_run_endpoint():
     except Exception as e:
         logger.exception("IDE execution failed")
         return jsonify({"output": f"Execution Error: {str(e)}"}), 500
+
+
+@app.route("/api/agent", methods=["GET"])
+def agent_health_check():
+    return jsonify({"status": "InterviewSense AI Agent Endpoint Active"})
+
+
+@app.route("/api/agent", methods=["POST"])
+@login_required
+@rate_limit(20, 60, scope="generate")
+def agent_endpoint():
+    """Replaces the old standalone backend/agent.py FastAPI app, which had
+    no auth, no rate limit, and no chat ownership check on this same call."""
+    try:
+        payload = request.get_json(silent=True) or {}
+        message = (payload.get("message") or "").strip()
+        if not message:
+            return jsonify({"status": "error", "message": "message is required"}), 400
+        chat_id = (payload.get("chat_id") or "default").strip() or "default"
+        err = check_chat_auth(chat_id)
+        if err:
+            return err
+        api_key = request.headers.get("X-HF-API-Key") or None
+        result = generate_career_plan(
+            user_input=message,
+            history=[],
+            career_config={},
+            chat_id=chat_id,
+            api_key=api_key,
+        )
+        return jsonify({"status": "success", "data": result})
+    except Exception as e:
+        logger.exception("Agent endpoint failed.")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 # ── Entry point ───────────────────────────────────────────────

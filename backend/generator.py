@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from huggingface_hub import InferenceClient
 
 from backend.prompts import get_prompt
+from backend import cache
 
 # Explicitly load .env from project root relative to this file
 _dir = os.path.dirname(os.path.abspath(__file__))
@@ -34,7 +35,7 @@ def _get_client(api_key: str = None) -> InferenceClient:
     global _client
     if _client is None:
         env_key = os.getenv("HF_TOKEN") or os.getenv("HF_API_KEY")
-        logger.info("Resolving client token from env. Found: %s", env_key[:10] if env_key else None)
+        logger.info("Resolving client token from env. Found: %s", bool(env_key))
         if not env_key:
             raise EnvironmentError("No Hugging Face API key found. Set HF_TOKEN or HF_API_KEY.")
         _client = InferenceClient(api_key=env_key)
@@ -97,6 +98,16 @@ def generate_notes(
     if reply:
         return reply
 
+    # Cache only when there's no conversation history — once a chat has
+    # back-and-forth context, the "same" topic string can mean something
+    # different, so we don't want a stale cached reply standing in.
+    cache_key = None
+    if not history and task != "review":
+        cache_key = cache.make_key("notes", task, mode or "", user_input, file_text[:500])
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
     prompt = get_prompt(
         task=task,
         topic=user_input,
@@ -116,7 +127,10 @@ def generate_notes(
     messages = [system_msg] + history + [{"role": "user", "content": prompt}]
 
     try:
-        return run_completion(messages, api_key=api_key)
+        result = run_completion(messages, api_key=api_key)
+        if cache_key:
+            cache.set(cache_key, result)
+        return result
     except EnvironmentError as e:
         logger.error("API key not configured: %s", e)
         return "⚠️ The AI provider token is not configured on the server. Please set HF_TOKEN."
@@ -134,8 +148,10 @@ def evaluate_quiz_answer(topic: str, user_answer: str, api_key: str = None) -> t
         f"You are a strict technical interviewer evaluating a candidate's answer.\n\n"
         f"TOPIC: {topic}\n\n"
         f"CANDIDATE ANSWER:\n{user_answer}\n\n"
-        f"Evaluate the answer. Your response MUST follow this exact format:\n"
-        f"STATUS: PASS or FAIL\n"
+        f"Evaluate the answer. Your response MUST follow this exact format, "
+        f"with each label on its own line and nothing else on that line:\n"
+        f"STATUS: PASS\n"
+        f"(or STATUS: FAIL)\n"
         f"SCORE: X/10\n"
         f"FEEDBACK:\n<2-4 sentences of specific gap analysis and what was correct or missing>"
     )
@@ -151,15 +167,47 @@ def evaluate_quiz_answer(topic: str, user_answer: str, api_key: str = None) -> t
         logger.exception("Quiz evaluation failed.")
         return ("Evaluation service is temporarily unavailable. Please try again.", False, 0)
 
-    upper = result.upper()
-    passed = "STATUS: PASS" in upper or (
-        "STATUS: FAIL" not in upper and
-        any(f"SCORE: {s}" in upper for s in ("6/10", "7/10", "8/10", "9/10", "10/10"))
+    passed, score = _parse_quiz_verdict(result)
+    return (result, passed, score)
+
+
+def _parse_quiz_verdict(result: str) -> tuple[bool, int]:
+    """Parse a STATUS/SCORE response robustly, independent of exact model
+    phrasing/whitespace/case. Falls back to a conservative score-based
+    verdict only if STATUS is genuinely absent, and never lets an
+    unparseable response silently become a pass.
+
+    The old implementation only matched the literal substring
+    "STATUS: PASS" and inferred PASS from co-occurring score strings like
+    "6/10" anywhere in the text — both break on trivial formatting drift
+    (lowercase, extra spaces, "Status : Pass", punctuation) and the score
+    inference could misfire on numbers appearing elsewhere in the feedback.
+    """
+    # STATUS: anchored to start-of-line, tolerant of case/spacing/punctuation
+    status_match = re.search(
+        r"^\s*status\s*:?\s*(pass|fail)\b", result, re.IGNORECASE | re.MULTILINE
     )
 
+    # SCORE: tolerant of "SCORE: 7/10", "Score:7 / 10", "score - 7/10", etc.
+    score_match = re.search(
+        r"^\s*score\s*[:\-]?\s*(\d{1,2})\s*/\s*10\b", result, re.IGNORECASE | re.MULTILINE
+    )
     score = 0
-    score_match = re.search(r"SCORE:\s*(\d+)\s*/\s*10", result, re.IGNORECASE)
     if score_match:
-        score = int(score_match.group(1))
+        score = max(0, min(10, int(score_match.group(1))))
 
-    return (result, passed, score)
+    if status_match:
+        passed = status_match.group(1).lower() == "pass"
+    elif score_match:
+        # No explicit STATUS line but we do have a numeric score — use a
+        # documented, conservative threshold rather than silently
+        # defaulting to pass on missing data.
+        passed = score >= 6
+    else:
+        # Neither field parsed — the model didn't follow the format at all.
+        # Treat as a failed evaluation rather than guessing a result, so a
+        # malformed model response can never be mistaken for a passing grade.
+        logger.warning("Could not parse quiz verdict from model output: %r", result[:200])
+        passed = False
+
+    return passed, score

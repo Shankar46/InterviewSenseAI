@@ -1,26 +1,28 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from backend.career_assistant import generate_career_plan as run_agent
+# backend/agent.py
+#
+# SECURITY FIX: this file used to expose POST /api/agent as a completely
+# unauthenticated, unrate-limited entry point straight into
+# generate_career_plan() — bypassing every login_required / rate_limit /
+# chat-ownership check added to backend/main.py. Anyone who found this URL
+# got free, unlimited LLM generations on your bill, with no session
+# tracking and no abuse protection.
+#
+# vercel.json was routing "/api/agent" -> this file as a SEPARATE FastAPI
+# app from the Flask app in main.py, which is also an architecture
+# mismatch (config.js documents the backend as Flask; two frameworks were
+# being deployed as two different serverless functions for overlapping
+# concerns).
+#
+# Fix: route /api/agent through the same Flask app and decorators as every
+# other endpoint, instead of shipping a second, unguarded framework.
+# Update vercel.json to drop the separate agent.py build/route (see below).
+#
+# If you specifically need this for an external integration (e.g. a
+# third-party agent platform that expects a bare POST /api/agent contract),
+# keep this file but add the same auth + rate_limit decorators used in
+# main.py before calling generate_career_plan, and never call it directly
+# from generate_career_plan with raw user input again.
 
-# Vercel looks for this exact 'app' variable name
-app = FastAPI()
+from backend.main import app  # re-use the hardened Flask app; do not define a second app here
 
-# Define the structure of your incoming frontend payload
-class AgentRequest(BaseModel):
-    message: str
-
-@app.get("/api/agent")
-def health_check():
-    return {"status": "InterviewSense AI Agent Endpoint Active"}
-
-@app.post("/api/agent")
-def handle_agent(payload: AgentRequest):
-    try:
-        # Call your core function with the parsed message string
-        result = run_agent(payload.message)
-        return {"status": "success", "data": result}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# Keep your alias definitions intact for backwards compatibility
-__all__ = ["run_agent", "app"]
+__all__ = ["app"]

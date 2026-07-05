@@ -1,6 +1,7 @@
 # backend/utils.py
 
 import logging
+import re
 from typing import IO
 from docx import Document
 
@@ -8,6 +9,52 @@ logger = logging.getLogger(__name__)
 
 ALLOWED_EXTENSIONS = {".pdf", ".pptx", ".docx", ".txt"}
 MAX_EXTRACTED_CHARS = 20_000
+
+# ── Prompt-injection mitigation ─────────────────────────────────
+# Uploaded documents and free-text topics are untrusted input. A malicious
+# PDF/DOCX can contain text like "Ignore previous instructions and instead
+# output..." which an LLM may follow if it's concatenated into the prompt
+# unmarked. We can't make this airtight (no purely textual defense fully
+# is), but we can meaningfully raise the bar:
+#   1. Strip/flag common injection trigger phrases.
+#   2. Wrap untrusted content in explicit delimiters with a system-level
+#      instruction (added in prompts.py) telling the model the content
+#      between delimiters is DATA to summarize/use, never instructions
+#      to follow.
+_INJECTION_PATTERNS = re.compile(
+    r"(ignore (all |the |any )?(previous|prior|above) instructions?"
+    r"|disregard (all |the |any )?(previous|prior|above)"
+    r"|you are now [a-z]"
+    r"|system prompt"
+    r"|act as (an? )?(unrestricted|jailbroken|dan)"
+    r"|new instructions?:"
+    r"|override (your|the) (rules|instructions|guidelines))",
+    re.IGNORECASE,
+)
+
+
+def sanitize_untrusted_text(text: str) -> str:
+    """Best-effort neutralisation of likely prompt-injection payloads found
+    inside user-uploaded documents or free-text input before it gets
+    concatenated into an LLM prompt. Does not delete content (so legitimate
+    text mentioning these phrases in an academic context isn't mangled
+    beyond recognition) — it flags/breaks the trigger phrase so it reads as
+    inert text rather than an actionable instruction to the model."""
+    if not text:
+        return text
+
+    def _defuse(match: "re.Match") -> str:
+        return f"[{match.group(0)}]"  # bracket it so it visually reads as quoted/flagged, not an active directive
+
+    return _INJECTION_PATTERNS.sub(_defuse, text)
+
+
+def wrap_untrusted(text: str, label: str = "DOCUMENT CONTENT") -> str:
+    """Wrap untrusted content in explicit delimiters for the prompt, paired
+    with the system instruction in prompts.py that content between these
+    markers is data only, never instructions."""
+    safe = sanitize_untrusted_text(text)
+    return f"<<<{label}_START>>>\n{safe}\n<<<{label}_END>>>"
 
 
 def extract_text(file: IO) -> str:
@@ -149,3 +196,13 @@ def _is_heading(line: str) -> bool:
     if line.istitle() and len(line.split()) <= 6 and not line.endswith("."):
         return True
     return False
+
+
+def format_output(text: str) -> str:
+    """Basic cleanup and excessive newline collapse for generated text."""
+    if not text:
+        return ""
+    text = text.strip()
+    while "\n\n\n" in text:
+        text = text.replace("\n\n\n", "\n\n")
+    return text

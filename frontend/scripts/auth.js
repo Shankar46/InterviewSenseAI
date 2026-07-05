@@ -7,18 +7,18 @@ const Auth = (() => {
   let username = null;
 
   // ── DOM selectors ──────────────────────────────────────────
-  const screen      = document.getElementById("auth-screen");
-  const cardTitle   = document.getElementById("auth-card-title");
-  const cardSub     = document.getElementById("auth-card-subtitle");
-  const form        = document.getElementById("auth-form");
-  const submitBtn   = document.getElementById("auth-submit-btn");
-  const toggleMsg   = document.getElementById("auth-toggle-msg");
-  const toggleBtn   = document.getElementById("auth-toggle-btn");
+  const screen = document.getElementById("auth-screen");
+  const cardTitle = document.getElementById("auth-card-title");
+  const cardSub = document.getElementById("auth-card-subtitle");
+  const form = document.getElementById("auth-form");
+  const submitBtn = document.getElementById("auth-submit-btn");
+  const toggleMsg = document.getElementById("auth-toggle-msg");
+  const toggleBtn = document.getElementById("auth-toggle-btn");
   const usernameInput = document.getElementById("auth-username");
   const passwordInput = document.getElementById("auth-password");
 
-  const gateway     = document.getElementById("gateway");
-  const appEl       = document.getElementById("app");
+  const gateway = document.getElementById("gateway");
+  const appEl = document.getElementById("app");
 
   // ── Getters ────────────────────────────────────────────────
   function getToken() {
@@ -66,10 +66,14 @@ const Auth = (() => {
       }
     } catch (err) {
       console.warn("[Auth] Server health/auth check failed:", err);
-      // If server is offline, trust local session or fall back gracefully
-      updateUserBadges(localUser);
-      hideScreen();
-      return true;
+      // Fail closed: a network error here could mean the token was revoked
+      // and we just can't reach the server to confirm it, or it could mean
+      // the user is briefly offline. We do NOT grant access on an
+      // unverifiable token — show a retry-aware auth screen instead of
+      // silently trusting whatever is in localStorage.
+      UI.showToast("Could not verify your session. Please check your connection and try again.", "warning");
+      showScreen();
+      return false;
     }
   }
 
@@ -150,6 +154,7 @@ const Auth = (() => {
           username = data.username;
           localStorage.setItem("isai_auth_token", token);
           localStorage.setItem("isai_auth_username", username);
+          Store.rehydrate();
 
           // Update elements & change screens
           updateUserBadges(username);
@@ -200,7 +205,7 @@ const Auth = (() => {
         headers: {
           "Authorization": `Bearer ${curToken}`
         }
-      }).catch(() => {});
+      }).catch(() => { });
     }
 
     // Reset UI Badges and transition back to Auth screen
