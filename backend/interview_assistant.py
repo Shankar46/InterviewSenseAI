@@ -6,7 +6,7 @@ import json
 import logging
 import re
 
-from backend.db import get_connection, load_session_state, push_notification
+from backend.db import USE_POSTGRES, get_connection, load_session_state, push_notification
 from backend.generator import run_completion
 
 logger = logging.getLogger(__name__)
@@ -27,8 +27,7 @@ def _generate_question_bank(
         jd_q_count = 10
         coding_q_count = 2
     else:
-        # Capping at 3 questions if no client API key is provided (Demo Session)
-        q_limit = 3 if not api_key else TOTAL_QUESTIONS
+        q_limit = TOTAL_QUESTIONS
         career_q_count = max(1, q_limit // CAREER_RATIO) if career_topics else 0
         jd_q_count     = q_limit - career_q_count
         coding_q_count = 0
@@ -206,10 +205,15 @@ def init_interview_db():
                               ("round_type", "TEXT NOT NULL DEFAULT 'tech'"),
                               ("report_feedback", "TEXT NOT NULL DEFAULT ''"),
                               ("weekly_career_day", "INTEGER NOT NULL DEFAULT 0")]:
-            try:
-                conn.execute(f"ALTER TABLE interview_sessions ADD COLUMN {col} {col_type}")
-            except Exception:
-                pass
+            if USE_POSTGRES:
+                conn.execute(
+                    f"ALTER TABLE interview_sessions ADD COLUMN IF NOT EXISTS {col} {col_type}"
+                )
+            else:
+                try:
+                    conn.execute(f"ALTER TABLE interview_sessions ADD COLUMN {col} {col_type}")
+                except Exception:
+                    pass
 
 
 def _save_interview_session(chat_id: str, data: dict):

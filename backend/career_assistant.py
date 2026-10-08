@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import re
-from datetime import date
+from datetime import date, timedelta
 
 from dotenv import load_dotenv
 
@@ -21,6 +21,56 @@ from backend.generator import evaluate_quiz_answer, run_completion
 
 load_dotenv()
 logger = logging.getLogger(__name__)
+
+# ── Weekend scheduling ────────────────────────────────────────
+
+def _is_weekend() -> bool:
+    """True if today is Saturday (5) or Sunday (6)."""
+    return date.today().weekday() in (5, 6)
+
+
+def get_weekend_interview_status(chat_id: str, state: dict | None) -> dict | None:
+    """
+    Returns a weekend interview payload if today is Sat/Sun,
+    the user has started their roadmap, and completed >= 3 days.
+    Returns None otherwise.
+    """
+    if not _is_weekend() or not state or not state.get("started"):
+        return None
+
+    progress  = get_session_progress_map(chat_id, state["duration_days"])
+    completed = [d for d, s in progress.items() if s == "completed"]
+    if len(completed) < 3:
+        return None
+
+    plan          = state.get("day_plan", [])
+    recent_days   = sorted(completed)[-5:]
+    recent_topics = []
+    for day_num in recent_days:
+        idx = day_num - 1
+        if idx < len(plan):
+            recent_topics.append(plan[idx]["topic"])
+
+    next_sat = date.today()
+    if next_sat.weekday() != 5:
+        days_until = (5 - next_sat.weekday()) % 7 or 7
+        next_sat = next_sat + timedelta(days=days_until)
+
+    return {
+        "is_weekend":      True,
+        "topics":          recent_topics,
+        "completed_count": len(completed),
+        "message": (
+            f"## Weekend Mock Interview Ready\n\n"
+            f"It is the weekend — time to consolidate your learning!\n\n"
+            f"**Topics covered this week:**\n"
+            + "\n".join(f"  - {t}" for t in recent_topics)
+            + f"\n\nA mock interview covering these topics is ready. "
+              f"Click **Weekly Mock Interview** in the top bar to begin."
+        ),
+    }
+
+
 
 # ── Constants ────────────────────────────────────────────────
 ACTIVE_MODEL = "Qwen/Qwen2.5-72B-Instruct"

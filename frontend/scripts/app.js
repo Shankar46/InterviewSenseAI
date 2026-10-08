@@ -7,6 +7,7 @@ const App = (() => {
   let currentTask = "notes";
   let _localNotifs = [];    // client-side notification queue
   let currentCareerDay = null;
+  let _sharedQuota = null;
 
   // ── DOM elements ──────────────────────────────────────────
   const gateway          = document.getElementById("gateway");
@@ -210,6 +211,7 @@ const App = (() => {
         return;
       }
       if (data.tracker) handleTrackerUpdate(data.tracker);
+      if (data.weekend) handleWeekendInterview(data.weekend);
 
       const introText = data.text || data.answer || "";
       if (introText && !Store.hasLoadingMessage(chatId) && !Store.hasRoadmap(chatId)) {
@@ -326,27 +328,59 @@ const App = (() => {
   }
 
   function _updateApiKeyStatusUI() {
-    const key = localStorage.getItem("user_hf_api_key");
+    const key = localStorage.getItem("user_groq_api_key");
     const gwStatus = document.getElementById("gateway-key-status");
-    const modalKeyInput = document.getElementById("modal-hf-key");
+    const modalKeyInput = document.getElementById("modal-groq-key");
+    const quotaStatus = document.getElementById("shared-key-quota-status");
 
     if (key) {
       if (gwStatus) {
         gwStatus.className = "key-status-badge active";
-        gwStatus.textContent = "🟢 Custom API Key Active";
+        gwStatus.textContent = "🟢 Using Your Groq Key";
       }
       if (modalKeyInput) {
         modalKeyInput.value = key;
       }
+      if (quotaStatus) {
+        quotaStatus.textContent = "Your Groq key is active. Requests use your Groq account's limits, not the shared daily allowance.";
+      }
     } else {
       if (gwStatus) {
-        gwStatus.className = "key-status-badge shared";
-        gwStatus.textContent = "🔴 Shared Key (Demo Mode)";
+        const remaining = _sharedQuota?.requests_remaining;
+        const limit = _sharedQuota?.daily_limit;
+        const serverKeyAvailable = _sharedQuota?.server_key_configured;
+        gwStatus.className = serverKeyAvailable && Number.isInteger(remaining) && remaining > 0
+          ? "key-status-badge active"
+          : "key-status-badge shared";
+        gwStatus.textContent = serverKeyAvailable && Number.isInteger(remaining) && Number.isInteger(limit)
+          ? `Shared key: ${remaining}/${limit} left today`
+          : serverKeyAvailable === false
+            ? "Shared key unavailable"
+            : "Shared Groq Key";
       }
       if (modalKeyInput) {
         modalKeyInput.value = "";
       }
+      if (quotaStatus) {
+        if (_sharedQuota && !_sharedQuota.server_key_configured) {
+          quotaStatus.textContent = "The shared Groq key is not configured. Add your own Groq API key to continue.";
+        } else if (_sharedQuota) {
+          quotaStatus.textContent =
+            `${_sharedQuota.requests_remaining} of ${_sharedQuota.daily_limit} shared-key AI questions remain today (resets at 00:00 UTC). Add your own key to use your Groq account instead.`;
+        } else {
+          quotaStatus.textContent = "Shared-key use is limited to 5 AI questions per user each UTC day.";
+        }
+      }
     }
+  }
+
+  function _refreshSharedQuota() {
+    Api.getUsage()
+      .then(data => {
+        _sharedQuota = data.quota;
+        _updateApiKeyStatusUI();
+      })
+      .catch(error => console.warn("[API] Could not refresh shared-key usage:", error));
   }
 
   function _wireApiKeyModal() {
@@ -356,11 +390,25 @@ const App = (() => {
     const modal = document.getElementById("api-key-modal");
     const saveBtn = document.getElementById("api-key-save-btn");
     const clearBtn = document.getElementById("api-key-clear-btn");
-    const keyInput = document.getElementById("modal-hf-key");
-    const toggleVisBtn = document.getElementById("toggle-hf-key-visibility");
+    const keyInput = document.getElementById("modal-groq-key");
+    const toggleVisBtn = document.getElementById("toggle-groq-key-visibility");
+
+    window.addEventListener("shared-key-quota", event => {
+      const { mode, remaining, limit } = event.detail;
+      if (mode === "shared" && Number.isInteger(remaining) && Number.isInteger(limit)) {
+        _sharedQuota = {
+          ..._sharedQuota,
+          server_key_configured: true,
+          requests_remaining: remaining,
+          daily_limit: limit,
+        };
+        _updateApiKeyStatusUI();
+      }
+    });
 
     const openModal = () => {
       _updateApiKeyStatusUI();
+      _refreshSharedQuota();
       if (modal) {
         modal.style.display = "flex";
       }
@@ -391,18 +439,18 @@ const App = (() => {
           UI.showToast("Please enter a valid token.", "warning");
           return;
         }
-        localStorage.setItem("user_hf_api_key", val);
+        localStorage.setItem("user_groq_api_key", val);
         _updateApiKeyStatusUI();
-        UI.showToast("Hugging Face token saved successfully!", "success");
+        UI.showToast("Groq API key saved successfully!", "success");
         closeModal();
       };
     }
 
     if (clearBtn) {
       clearBtn.onclick = () => {
-        localStorage.removeItem("user_hf_api_key");
+        localStorage.removeItem("user_groq_api_key");
         _updateApiKeyStatusUI();
-        UI.showToast("Hugging Face token cleared.", "info");
+        UI.showToast("Groq API key cleared.", "info");
         closeModal();
       };
     }
@@ -424,6 +472,7 @@ const App = (() => {
 
     _updateApiKeyStatusUI();
     _wireApiKeyModal();
+    if (isAuthed) _refreshSharedQuota();
     // Ensure a clean history baseline (no #hash from old visits)
     if (location.hash === "") {
       history.replaceState({ isai: false }, "", location.pathname);
@@ -558,7 +607,19 @@ const App = (() => {
     }
   }
 
-  return { init, handleTrackerUpdate, addNotif: _addLocalNotif };
+
+  // ── Weekend interview banner ──────────────────────────────
+  function handleWeekendInterview(weekendData) {
+    if (!weekendData) { UI.showWeekendBanner(null); return; }
+    UI.showWeekendBanner(weekendData);
+    _addLocalNotif(
+      "reminder",
+      "Weekend mock interview ready",
+      weekendData.topics?.slice(0, 3).join(", ") || "Your week's topics are ready for review."
+    );
+  }
+
+    return { init, handleTrackerUpdate, handleWeekendInterview, addNotif: _addLocalNotif };
 })();
 
 // Kick off once DOM is ready

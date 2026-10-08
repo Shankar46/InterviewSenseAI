@@ -12,16 +12,18 @@ from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
-from backend.career_assistant import generate_career_plan
+from backend.career_assistant import generate_career_plan, get_weekend_interview_status
 from backend.db import (
     delete_session,
     get_progress_stats,
+    get_session_messages,
     get_streak,
     get_unread_notifications,
     init_db,
     mark_notifications_read,
     reset_awaiting_answers,
     register_user,
+    save_message,
     verify_user,
     create_user_session,
     invalidate_user_session,
@@ -29,7 +31,8 @@ from backend.db import (
     get_connection,
     cleanup_expired_sessions,
 )
-from backend.generator import generate_notes
+from backend.generator import generate_notes, generate_concept_guide, evaluate_study_answer
+from backend.guardrails import validate_ai_input
 from backend.interview_assistant import (
     get_report      as get_interview_report,
     reset_interview_session,
@@ -38,6 +41,7 @@ from backend.interview_assistant import (
 )
 from backend.utils import extract_text, split_into_topic_blocks
 from backend.rate_limit import rate_limit, periodic_cleanup
+from backend.shared_key_quota import shared_key_daily_quota, shared_key_usage
 from functools import wraps
 
 # Explicitly load .env from project root relative to this file
@@ -45,13 +49,21 @@ _dir = os.path.dirname(os.path.abspath(__file__))
 _parent = os.path.dirname(_dir)
 load_dotenv(os.path.join(_parent, ".env"))
 
-# Normalise token env var
-if not os.getenv("HF_TOKEN") and os.getenv("HF_API_KEY"):
-    os.environ["HF_TOKEN"] = os.environ["HF_API_KEY"]
-
 # ── Flask app ────────────────────────────────────────────────
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = int(os.getenv("MAX_UPLOAD_MB", "16")) * 1024 * 1024
+
+
+@app.before_request
+def validate_ai_request_size():
+    message = validate_ai_input(
+        request.path,
+        request.form,
+        request.get_json(silent=True),
+    )
+    if message:
+        return jsonify({"status": "error", "message": message}), 413
+
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
@@ -69,7 +81,11 @@ _origins = [
     ).split(",")
     if o.strip()
 ]
-CORS(app, resources={r"/api/*": {"origins": _origins}, r"/generate": {"origins": _origins}})
+CORS(
+    app,
+    resources={r"/api/*": {"origins": _origins}, r"/generate": {"origins": _origins}},
+    expose_headers=["X-Shared-Key-Mode", "X-Shared-Key-Remaining", "X-Shared-Key-Limit"],
+)
 
 # ── DB init ──────────────────────────────────────────────────
 init_db()
@@ -214,7 +230,7 @@ def _handle_request(req) -> object:
 
     history       = _parse_field(req.form.get("history"), [])
     career_config = _parse_field(req.form.get("career_config"), {})
-    api_key       = req.headers.get("X-HF-API-Key") or None
+    api_key       = req.headers.get("X-Groq-API-Key") or None
 
     # ── Career path ───────────────────────────────────────────
     if assistant == "career":
@@ -351,11 +367,18 @@ def auth_me():
     })
 
 
+@app.route("/api/usage", methods=["GET"])
+@login_required
+def usage_endpoint():
+    return jsonify({"status": "ok", "quota": shared_key_usage(request.user["user_id"])})
+
+
 # ── Routes ───────────────────────────────────────────────────
 
 @app.route("/api/workspace/generate", methods=["POST"])
 @login_required
 @rate_limit(20, 60, scope="generate")
+@shared_key_daily_quota
 def workspace_endpoint():
     try:
         return _handle_request(request)
@@ -367,6 +390,7 @@ def workspace_endpoint():
 @app.route("/api/edtech/generate", methods=["POST"])
 @login_required
 @rate_limit(20, 60, scope="generate")
+@shared_key_daily_quota
 def edtech_endpoint():
     try:
         return _handle_request(request)
@@ -377,6 +401,8 @@ def edtech_endpoint():
 
 @app.route("/generate", methods=["POST"])
 @login_required
+@rate_limit(20, 60, scope="generate")
+@shared_key_daily_quota
 def legacy_endpoint():
     """Legacy route — kept for backwards compatibility."""
     try:
@@ -478,6 +504,8 @@ def health_endpoint():
 
 @app.route("/api/interview/start", methods=["POST"])
 @login_required
+@rate_limit(20, 60, scope="generate")
+@shared_key_daily_quota
 def interview_start_endpoint():
     """Initialise a mock interview session and return the first question."""
     try:
@@ -501,7 +529,7 @@ def interview_start_endpoint():
         if resume_file and resume_file.filename:
             resume_text = extract_text(resume_file)[:3000] or resume_text
 
-        api_key = request.headers.get("X-HF-API-Key") or None
+        api_key = request.headers.get("X-Groq-API-Key") or None
         result = start_interview(chat_id, role, company, jd_text, resume_text, domain, round_type, weekly_career_day, api_key=api_key)
         return jsonify(result)
     except Exception:
@@ -511,6 +539,8 @@ def interview_start_endpoint():
 
 @app.route("/api/interview/answer", methods=["POST"])
 @login_required
+@rate_limit(20, 60, scope="generate")
+@shared_key_daily_quota
 def interview_answer_endpoint():
     """Evaluate a candidate's answer and return feedback + next question or report."""
     try:
@@ -519,7 +549,7 @@ def interview_answer_endpoint():
         if err:
             return err
         answer  = request.form.get("answer", "").strip()
-        api_key = request.headers.get("X-HF-API-Key") or None
+        api_key = request.headers.get("X-Groq-API-Key") or None
         result  = submit_answer(chat_id, answer, api_key=api_key)
         return jsonify(result)
     except Exception:
@@ -529,6 +559,8 @@ def interview_answer_endpoint():
 
 @app.route("/api/interview/report", methods=["GET"])
 @login_required
+@rate_limit(20, 60, scope="generate")
+@shared_key_daily_quota
 def interview_report_endpoint():
     """Return the final interview report card."""
     try:
@@ -536,7 +568,7 @@ def interview_report_endpoint():
         err = check_chat_auth(chat_id)
         if err:
             return err
-        api_key = request.headers.get("X-HF-API-Key") or None
+        api_key = request.headers.get("X-Groq-API-Key") or None
         result  = get_interview_report(chat_id, api_key=api_key)
         return jsonify(result)
     except Exception:
@@ -641,6 +673,7 @@ def agent_health_check():
 @app.route("/api/agent", methods=["POST"])
 @login_required
 @rate_limit(20, 60, scope="generate")
+@shared_key_daily_quota
 def agent_endpoint():
     """Replaces the old standalone backend/agent.py FastAPI app, which had
     no auth, no rate limit, and no chat ownership check on this same call."""
@@ -653,7 +686,7 @@ def agent_endpoint():
         err = check_chat_auth(chat_id)
         if err:
             return err
-        api_key = request.headers.get("X-HF-API-Key") or None
+        api_key = request.headers.get("X-Groq-API-Key") or None
         result = generate_career_plan(
             user_input=message,
             history=[],
@@ -668,6 +701,75 @@ def agent_endpoint():
 
 
 # ── Entry point ───────────────────────────────────────────────
+
+
+# ── Message persistence endpoints ─────────────────────────────
+
+@app.route("/api/sessions/<session_id>/messages", methods=["GET"])
+def get_messages_endpoint(session_id):
+    """Load saved messages for a session (for chat persistence)."""
+    try:
+        msgs = get_session_messages(session_id, limit=200)
+        return jsonify({"status": "ok", "messages": msgs})
+    except Exception:
+        logger.exception("Get messages failed.")
+        return jsonify({"status": "error", "messages": []}), 500
+
+
+@app.route("/api/sessions/<session_id>/messages", methods=["POST"])
+def save_message_endpoint(session_id):
+    """Save a single message for persistence."""
+    try:
+        data    = request.get_json(silent=True) or {}
+        role    = data.get("role", "").strip()
+        content = data.get("content", "").strip()
+        if not role or not content or content == "__loading__":
+            return jsonify({"status": "ok"})
+        save_message(session_id, role, content)
+        return jsonify({"status": "ok"})
+    except Exception:
+        logger.exception("Save message failed.")
+        return jsonify({"status": "error"}), 500
+
+
+# ── Evaluate endpoint ─────────────────────────────────────────
+
+@app.route("/api/evaluate", methods=["POST"])
+@login_required
+@rate_limit(20, 60, scope="generate")
+@shared_key_daily_quota
+def evaluate_endpoint():
+    """Standalone rubric evaluation for study workspace."""
+    try:
+        topic       = request.form.get("topic", "General Knowledge").strip()
+        answer      = request.form.get("answer", "").strip()
+        answer_type = request.form.get("answer_type", "exam").strip()
+        api_key     = request.headers.get("X-Groq-API-Key") or request.form.get("api_key", "").strip() or None
+        if not answer:
+            return jsonify({"status": "error", "message": "No answer provided."}), 400
+        result = evaluate_study_answer(answer, topic, answer_type, api_key=api_key)
+        return jsonify({"status": "ok", "evaluation": result})
+    except Exception:
+        logger.exception("Evaluation endpoint failed.")
+        return jsonify({"status": "error", "message": "Evaluation failed."}), 500
+
+
+# ── Weekend status endpoint ───────────────────────────────────
+
+@app.route("/api/edtech/weekend", methods=["GET"])
+def weekend_status_endpoint():
+    """Check if weekend mock interview is available for this session."""
+    try:
+        from backend.db import load_session_state
+        chat_id = request.args.get("chat_id", "default").strip() or "default"
+        state   = load_session_state(chat_id)
+        weekend = get_weekend_interview_status(chat_id, state) if state else None
+        return jsonify({"status": "ok", "weekend": weekend})
+    except Exception:
+        logger.exception("Weekend status failed.")
+        return jsonify({"status": "ok", "weekend": None})
+
+
 if __name__ == "__main__":
     app.run(
         host=os.getenv("FLASK_HOST", "127.0.0.1"),

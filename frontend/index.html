@@ -69,7 +69,7 @@
     <div class="gateway-settings-bar">
       <span id="gateway-user-badge" class="user-badge-text">👤 <span id="gateway-username-display"></span></span>
       <button id="gateway-logout-btn" class="settings-btn" type="button" title="Sign Out">🚪 Logout</button>
-      <span id="gateway-key-status" class="key-status-badge shared">🔴 Shared Key (Demo Mode)</span>
+      <span id="gateway-key-status" class="key-status-badge shared">Shared Groq Key</span>
       <button id="gateway-key-btn" class="settings-btn" type="button">🔑 Setup API Key</button>
     </div>
     <h1 class="gw-title">Your Adaptive<br>Intelligence Suite</h1>
@@ -397,46 +397,46 @@
 <div id="api-key-modal" class="modal-overlay" style="display: none;">
   <div class="modal-content">
     <div class="modal-header">
-      <h3>🔑 Hugging Face API Key Setup</h3>
+      <h3>🔑 Groq API Key Setup</h3>
       <button class="modal-close" id="api-key-close-btn" type="button">✕</button>
     </div>
     <div class="modal-body">
       <p class="modal-desc">
-        Configure your personal Hugging Face API key to enable direct completions. If no key is set, you will use a shared demo key (limited to 3 questions for Mock Interviews).
+        Use your own Groq API key (BYOK) and continue until you reach your Groq account's limits, or use the shared server key for up to 5 AI questions per user each UTC day.
       </p>
+      <p id="shared-key-quota-status" aria-live="polite"></p>
 
       <div class="form-group">
-        <label for="modal-hf-key" class="form-label">Hugging Face API Token (HF_TOKEN)</label>
+        <label for="modal-groq-key" class="form-label">Groq API Key (GROQ_API_KEY)</label>
         <div class="api-key-input-container">
-          <input type="password" id="modal-hf-key" placeholder="hf_..." autocomplete="off">
-          <button id="toggle-hf-key-visibility" class="visibility-btn" type="button" title="Show/Hide Key">👁️</button>
+          <input type="password" id="modal-groq-key" placeholder="gsk_..." autocomplete="off">
+          <button id="toggle-groq-key-visibility" class="visibility-btn" type="button" title="Show/Hide Key">👁️</button>
         </div>
       </div>
 
       <div class="modal-actions">
-        <button class="btn btn-primary" id="api-key-save-btn" type="button">Save Token</button>
-        <button class="btn btn-secondary" id="api-key-clear-btn" type="button">Clear Token</button>
+        <button class="btn btn-primary" id="api-key-save-btn" type="button">Save API Key</button>
+        <button class="btn btn-secondary" id="api-key-clear-btn" type="button">Clear API Key</button>
       </div>
 
       <div class="setup-guide">
-        <h4>📋 How to get a free Hugging Face API Key:</h4>
+        <h4>📋 How to get a Groq API Key:</h4>
         <ol>
-          <li>Create or log in to your account at <a href="https://huggingface.co/" target="_blank" rel="noopener noreferrer">Hugging Face</a>.</li>
-          <li>Go to your <strong>Profile</strong> (top right) &gt; <strong>Settings</strong> &gt; <strong>Access Tokens</strong>.</li>
-          <li>Click <strong>New token</strong>, give it a name (e.g. <code>InterviewSense</code>), set the role to <strong>Read</strong>, and click <strong>Generate token</strong>.</li>
-          <li>Copy the generated token starting with <code>hf_</code> and paste it above.</li>
+          <li>Create or log in to your account at <a href="https://console.groq.com/" target="_blank" rel="noopener noreferrer">GroqCloud</a>.</li>
+          <li>Open <strong>API Keys</strong> and create a new key.</li>
+          <li>Copy the key starting with <code>gsk_</code> and paste it above. Keep it private.</li>
         </ol>
       </div>
       
       <div class="video-reference-container">
-        <h4>🎥 Video Walkthrough:</h4>
+        <h4>🔑 Groq API Keys:</h4>
         <div class="video-placeholder-card">
-          <div class="video-card-icon">▶️</div>
+          <div class="video-card-icon">🔑</div>
           <div class="video-card-details">
-            <strong>How to Generate Hugging Face API Tokens</strong>
-            <span>Watch a quick step-by-step video tutorial</span>
+            <strong>Create a Groq API Key</strong>
+            <span>Manage API keys in your GroqCloud account</span>
           </div>
-          <a href="https://www.youtube.com/watch?v=dQw4w9WgXcQ" target="_blank" rel="noopener noreferrer" class="watch-video-btn">Watch Video</a>
+          <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer" class="watch-video-btn">Open API Keys</a>
         </div>
       </div>
     </div>

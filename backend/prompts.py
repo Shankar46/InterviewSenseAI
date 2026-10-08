@@ -187,3 +187,113 @@ GLOBAL OUTPUT RULES:
 ══════════════════════════════════════════
 Return ONLY the final formatted output. No meta-commentary.
 """
+
+# ── Concept guide prompt ──────────────────────────────────────
+
+def build_concept_guide_prompt(
+    concept_title: str,
+    concept_content: str,
+    concept_number: int,
+    total_concepts: int,
+) -> str:
+    """Guided concept-by-concept teaching prompt, gap-fills thin content."""
+    is_thin = len((concept_content or "").strip()) < 200
+    supplement = (
+        "IMPORTANT: Document content for this concept is sparse. "
+        "Supplement heavily with expert knowledge — the document names the topic, "
+        "your knowledge provides the depth the student needs."
+    ) if is_thin else (
+        "The document has content. Use it as primary source and add expert context where needed."
+    )
+
+    return f"""ROLE: Personal academic tutor — teach one concept at a time.
+TASK: Teach concept {concept_number} of {total_concepts}: {concept_title}
+
+{supplement}
+
+STRUCTURE (use these exact headings):
+## {concept_title}
+
+### What is it?
+2-3 sentence definition. Plain language first, precise second.
+
+### Why does it matter?
+Real-world relevance — why a practitioner or exam candidate needs this.
+
+### How it works
+Step-by-step explanation of the mechanism or process.
+
+### Key points to remember
+3-5 bullet points — the things an examiner specifically tests.
+
+### Quick example
+One concrete example that makes the concept tangible.
+
+### Likely exam question
+One realistic exam question + a 2-sentence model answer.
+
+---
+*Concept {concept_number} of {total_concepts}. Type **next** to continue or ask a follow-up.*
+
+RULES:
+- If content is sparse, draw on expert knowledge — never say "the document doesn't cover this."
+- Do NOT copy-paste raw document text — synthesise and teach.
+- Target: 400-600 words. Thorough but scannable.
+{_fence("CONCEPT")}
+Title: {concept_title}
+Content: {(concept_content or "").strip()[:2000] or "(No content — use expert knowledge)"}
+{_fence("OUTPUT")}
+Start directly with ## {concept_title}"""
+
+
+# ── Evaluation prompt ─────────────────────────────────────────
+
+def build_evaluation_prompt(topic: str, student_answer: str, answer_type: str = "exam") -> str:
+    """Rubric-based evaluation with structured output."""
+    context_label = {
+        "exam":       "university exam answer",
+        "assignment": "academic assignment",
+        "quiz":       "technical quiz answer",
+        "career":     "technical interview answer",
+    }.get(answer_type, "written response")
+
+    return f"""ROLE: Strict but fair academic evaluator and technical interviewer.
+TASK: Evaluate this {context_label} on: "{topic}"
+
+OUTPUT FORMAT — respond in this EXACT structure, starting with STATUS on line 1:
+
+STATUS: PASS or FAIL
+SCORE: X/10
+
+## Criterion Scores
+| Criterion | Score | Comment |
+|---|---|---|
+| Conceptual Accuracy (30%) | /10 | one line |
+| Depth & Completeness (25%) | /10 | one line |
+| Structure & Clarity (20%) | /10 | one line |
+| Examples Used (15%) | /10 | one line |
+| Language & Precision (10%) | /10 | one line |
+
+## What You Got Right
+2-3 specific genuine strengths from the answer.
+
+## Critical Gaps
+2-4 specific things missing or incorrect. Direct and constructive.
+
+## Model Answer Outline
+5-7 bullet points of what an ideal answer covers.
+
+## One Improvement Action
+One specific, actionable thing the student should do to improve on this topic.
+
+SCORING: 8-10 = PASS (strong). 6-7 = PASS (adequate). Below 6 = FAIL.
+{_fence("TOPIC")}
+{topic}
+{_fence("STUDENT ANSWER")}
+{(student_answer or "")[:2000]}
+{_fence("OUTPUT")}
+Start with STATUS: on line 1. No preamble."""
+
+
+def _fence(label: str) -> str:
+    return f"\n{'─' * 50}\n{label}\n{'─' * 50}\n"

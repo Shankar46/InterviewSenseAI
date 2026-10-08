@@ -19,7 +19,7 @@ An intelligent, full-stack mock interview preparation platform and career study-
 | Component | Technologies Used |
 | :--- | :--- |
 | **Backend API** | Python, Flask, WSGI Server, Werkzeug |
-| **Database** | SQLite3 (WAL Journal Mode, Foreign Key Cascade) |
+| **Database** | SQLite3 for local development; PostgreSQL (Neon) for persistent hosting |
 | **Security / Auth** | `hashlib` (PBKDF2-HMAC-SHA256), `secrets` token generator |
 | **Code Runner** | Judge0 API (Sandboxed Compiler & Executer) |
 | **Frontend UI** | HTML5, Vanilla CSS3 (Custom gradients, animations, glassmorphism) |
@@ -107,15 +107,44 @@ python -m venv venv
 pip install -r requirements.txt
 ```
 
-Create a `.env` file in the root directory:
+Copy `.env.example` to `.env` in the project root, then replace the placeholder
+with your Groq API key. Keep `.env` local and never commit it:
 ```env
 FLASK_HOST=127.0.0.1
 PORT=5000
 FLASK_DEBUG=false
-HF_TOKEN=your_huggingface_token
+GROQ_API_KEY=your_groq_api_key
+# Optional: Neon PostgreSQL connection string (omit to use local SQLite)
+# DATABASE_URL=your_pooled_neon_postgresql_connection_string
+# Optional: override the default Groq model
+# GROQ_MODEL=openai/gpt-oss-120b
+# Shared-key allowance per user per UTC day (defaults to 5)
+# SHARED_KEY_DAILY_LIMIT=5
 ```
 
-### 2. Running the Application
+Users may either enter their own Groq key in the app (BYOK) or use the
+server-side `GROQ_API_KEY`. Shared-key AI questions are capped at 5 per account
+per UTC day by default; adjust `SHARED_KEY_DAILY_LIMIT` to change the cap.
+The server stores shared-key usage counts in the configured database, while
+personal keys stay in the user's browser storage and are sent only with that
+user's API requests.
+AI endpoints also enforce a 20-request-per-minute per-account rate limit and
+reject oversized text payloads. AI prompts include baseline safety and
+prompt-injection instructions; these model-level instructions are best-effort
+guardrails, not a substitute for human review.
+
+### 2. Persistent database for Vercel (Neon)
+
+The app uses SQLite when `DATABASE_URL` is not set, which is suitable for local
+development. For Vercel, create a PostgreSQL database in Neon and copy its
+pooled connection string (the string contains a database password; keep it
+private). Add it as the `DATABASE_URL` environment variable in the Vercel
+project settings for Production and any Preview environments you use. Add
+`GROQ_API_KEY` there as well, then redeploy. On startup, the app creates its
+tables in PostgreSQL. The database starts empty; existing SQLite data is not
+automatically copied, so users will need to register again.
+
+### 3. Running the Application
 Start the Flask backend:
 ```bash
 python -m backend.main

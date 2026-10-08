@@ -51,7 +51,7 @@ const UI = (() => {
   }
 
   // ── Messages ───────────────────────────────────────────────
-  function renderMessages(messages, mode) {
+  function renderMessages(messages, mode, skipScroll = false) {
     messagesWrap.innerHTML = "";
 
     if (!messages || messages.length === 0) {
@@ -71,8 +71,18 @@ const UI = (() => {
       if (m.content === "__loading__") {
         bubble.innerHTML = _buildSkeleton();
       } else {
-        const html = _renderMarkdown(m.content || "");
-        bubble.innerHTML = html;
+        const scoreCard = _buildScoreCard(m.content || "");
+        if (scoreCard) {
+          bubble.appendChild(scoreCard);
+          // Remove STATUS/SCORE lines from markdown body
+          const cleaned = (m.content || "")
+            .replace(/^STATUS:\s*(PASS|FAIL)\s*\n?/im, "")
+            .replace(/^SCORE:\s*\d+\s*\/\s*10\s*\n?/im, "")
+            .trim();
+          bubble.innerHTML += _renderMarkdown(cleaned);
+        } else {
+          bubble.innerHTML = _renderMarkdown(m.content || "");
+        }
 
         // Copy button for assistant messages
         if (m.role === "assistant") {
@@ -89,7 +99,7 @@ const UI = (() => {
       messagesWrap.appendChild(wrap);
     });
 
-    messagesWrap.scrollTop = messagesWrap.scrollHeight;
+    if (!skipScroll) messagesWrap.scrollTop = messagesWrap.scrollHeight;
   }
 
   function _buildEmptyState(mode) {
@@ -257,6 +267,82 @@ const UI = (() => {
     if (fileNameEl) fileNameEl.textContent = "";
   }
 
+
+  // ── Score card — renders evaluation responses visually ────
+  function _buildScoreCard(content) {
+    const statusMatch = content.match(/^STATUS:\s*(PASS|FAIL)/im);
+    const scoreMatch  = content.match(/SCORE:\s*(\d+)\s*\/\s*10/i);
+    if (!statusMatch || !scoreMatch) return null;
+    const passed = statusMatch[1].toUpperCase() === "PASS";
+    const score  = parseInt(scoreMatch[1], 10);
+    const pct    = Math.round((score / 10) * 100);
+    const color  = score >= 8 ? "var(--teal)" : score >= 6 ? "var(--amber)" : "var(--red)";
+    const ring   = Math.round(pct * 1.131);
+    const card   = document.createElement("div");
+    card.className = `score-card ${passed ? "pass" : "fail"}`;
+    card.innerHTML = `
+      <div class="sc-header">
+        <div>
+          <div class="sc-badge ${passed ? "pass" : "fail"}">${passed ? "PASSED" : "NEEDS REVIEW"}</div>
+          <div class="sc-topic">Assessment Result</div>
+        </div>
+        <div class="sc-score-wrap">
+          <svg class="sc-ring" viewBox="0 0 44 44" aria-hidden="true">
+            <circle cx="22" cy="22" r="18" fill="none" stroke="var(--surface2)" stroke-width="4"/>
+            <circle cx="22" cy="22" r="18" fill="none" stroke="${color}" stroke-width="4"
+              stroke-dasharray="${ring} 113.1" stroke-dashoffset="28.275" stroke-linecap="round"/>
+          </svg>
+          <span class="sc-score-num" style="color:${color}">${score}<span class="sc-denom">/10</span></span>
+        </div>
+      </div>`;
+    return card;
+  }
+
+
+  // ── Concept navigator progress bar ───────────────────────
+  function showConceptProgress(current, total) {
+    let bar = document.getElementById("concept-progress-bar");
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.id = "concept-progress-bar";
+      bar.className = "concept-progress-bar";
+      const iz = document.querySelector(".input-zone");
+      if (iz) iz.prepend(bar);
+    }
+    if (!current || !total) { bar.style.display = "none"; return; }
+    const pct = Math.round((current / total) * 100);
+    bar.style.display = "flex";
+    bar.innerHTML = `
+      <span class="cpb-label">Concept ${current} / ${total}</span>
+      <div class="cpb-track"><div class="cpb-fill" style="width:${pct}%"></div></div>
+      <span class="cpb-pct">${pct}%</span>`;
+  }
+
+
+  // ── Weekend interview banner ──────────────────────────────
+  function showWeekendBanner(weekendData) {
+    let banner = document.getElementById("weekend-banner");
+    if (!banner) {
+      banner = document.createElement("div");
+      banner.id = "weekend-banner";
+      banner.className = "weekend-banner";
+      const actions = document.querySelector(".topbar-actions");
+      if (actions) actions.prepend(banner);
+    }
+    if (!weekendData) { banner.style.display = "none"; return; }
+    banner.style.display = "flex";
+    banner.innerHTML = `
+      <span class="wb-dot"></span>
+      <span class="wb-text">Weekend interview ready</span>
+      <button class="wb-btn" id="wb-start-btn" type="button">Start →</button>`;
+    const btn = document.getElementById("wb-start-btn");
+    if (btn) btn.onclick = () => {
+      const inp = document.getElementById("user-input");
+      if (inp) { inp.value = "interview"; inp.dispatchEvent(new Event("input")); inp.focus(); }
+      banner.style.display = "none";
+    };
+  }
+
   return {
     renderMessages,
     renderSidebar,
@@ -268,5 +354,7 @@ const UI = (() => {
     setEnvBadge,
     showFile,
     clearFile,
+    showConceptProgress,
+    showWeekendBanner,
   };
 })();

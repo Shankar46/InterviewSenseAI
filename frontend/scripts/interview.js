@@ -98,20 +98,9 @@ const Interview = (() => {
       return;
     }
 
-    const userApiKey = localStorage.getItem("user_hf_api_key");
-    if (config.weeklyCareerDay > 0 && !userApiKey) {
-      UI.showToast("A personal Hugging Face API key is required to take weekly milestone evaluations.", "warning");
-      const modal = document.getElementById("api-key-modal");
-      if (modal) {
-        modal.style.display = "flex";
-        const keyInput = document.getElementById("modal-hf-key");
-        if (keyInput) keyInput.focus();
-      }
-      return;
-    }
-
+    const userApiKey = localStorage.getItem("user_groq_api_key");
     if (!userApiKey) {
-      UI.showToast("Running in Demo Mode (limited to 3 questions).", "info");
+      UI.showToast("Using the shared Groq key. You have up to 5 AI questions per UTC day; add your own key to use your account instead.", "info");
     }
 
     if (!config.resumeFile && !config.jdText) {
