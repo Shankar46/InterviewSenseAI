@@ -94,11 +94,13 @@ const Api = (() => {
 
   async function saveMessage(chatId, role, content) {
     if (!content || content === "__loading__") return;
-    const form = new FormData();
-    form.append("role",    role);
-    form.append("content", content);
+    // JSON, because that is what the endpoint parses. (FormData used to be sent
+    // here and the server silently stored nothing while answering "ok".)
     await _fetch(_url(`/api/sessions/${encodeURIComponent(chatId)}/messages`), {
-      method: "POST", body: form, timeout: 10000,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role, content }),
+      timeout: 10000,
     }).catch(() => {}); // fire-and-forget
   }
 
@@ -185,10 +187,13 @@ const Api = (() => {
     return res.json();
   }
 
-  async function submitAnswer({ chatId, answer }) {
+  async function submitAnswer({ chatId, answer, qNum }) {
     const form = new FormData();
     form.append("chat_id", chatId);
     form.append("answer",  answer);
+    // Which question this answers. The server uses it to make retries and
+    // double-clicks safe (an already-answered question is replayed, not re-graded).
+    if (qNum) form.append("q_num", qNum);
     const res = await _fetch(_url(CONFIG.ENDPOINTS.INTERVIEW_ANSWER), { method: "POST", body: form, timeout: 90000 });
     if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.message || `Server error ${res.status}`); }
     return res.json();

@@ -7,9 +7,12 @@ import hashlib
 import secrets
 import queue
 import threading
+import time
 from contextlib import contextmanager
 
 from dotenv import load_dotenv
+
+from backend import passwords
 
 _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(os.path.join(_project_root, ".env"))
@@ -35,7 +38,10 @@ elif os.environ.get("VERCEL"):
     DB_NAME = "/tmp/interviewsense.db"
     _IntegrityError = sqlite3.IntegrityError
 else:
-    DB_NAME = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "interviewsense.db")
+    # SQLITE_PATH lets tests / CI point at a throw-away database file.
+    DB_NAME = os.getenv("SQLITE_PATH") or os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "interviewsense.db"
+    )
     _IntegrityError = sqlite3.IntegrityError
 logger = logging.getLogger(__name__)
 
@@ -172,6 +178,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS users (
                 user_id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 username        TEXT UNIQUE NOT NULL,
+                username_lower  TEXT,
                 password_hash   TEXT NOT NULL,
                 created_at      TEXT NOT NULL DEFAULT (datetime('now'))
             );
@@ -180,7 +187,15 @@ def init_db():
                 session_token   TEXT PRIMARY KEY,
                 user_id         INTEGER NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
                 created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-                expires_at      TEXT NOT NULL
+                expires_at      TEXT NOT NULL,
+                user_agent      TEXT NOT NULL DEFAULT ''
+            );
+
+            CREATE TABLE IF NOT EXISTS login_failures (
+                throttle_key    TEXT PRIMARY KEY,
+                fail_count      INTEGER NOT NULL DEFAULT 0,
+                window_start    INTEGER NOT NULL,
+                locked_until    INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS user_chats (
@@ -252,10 +267,19 @@ def init_db():
                 asked_at     TEXT    NOT NULL DEFAULT (datetime('now')),
                 UNIQUE (chat_id, q_index)
             );
+
+            CREATE TABLE IF NOT EXISTS messages (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id    TEXT NOT NULL,
+                role       TEXT NOT NULL,
+                content    TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
         """)
 
         # Safely add any missing columns for older databases
         _migrate(conn)
+        _migrate_auth(conn)
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS shared_key_usage (
@@ -278,6 +302,7 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_progress_chat      ON progress(chat_id);
             CREATE INDEX IF NOT EXISTS idx_notifications_chat ON notifications(chat_id, is_read);
             CREATE INDEX IF NOT EXISTS idx_interview_qa_chat  ON interview_qa(chat_id);
+            CREATE INDEX IF NOT EXISTS idx_messages_chat      ON messages(chat_id, id);
         """)
     try:
         from backend.interview_assistant import init_interview_db
@@ -285,6 +310,35 @@ def init_db():
     except Exception as e:
         logger.warning("Failed to run interview db init: %s", e)
     logger.info("Database initialised at %s", DB_NAME)
+
+
+def _migrate_auth(conn):
+    """Add the account-hardening columns to databases created before they existed.
+    Runs on SQLite and Postgres (the older _migrate only handles SQLite)."""
+    if USE_POSTGRES:
+        conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS username_lower TEXT")
+        conn.execute("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS user_agent TEXT NOT NULL DEFAULT ''")
+    else:
+        user_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+        if "username_lower" not in user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN username_lower TEXT")
+        sess_cols = {row[1] for row in conn.execute("PRAGMA table_info(user_sessions)").fetchall()}
+        if "user_agent" not in sess_cols:
+            conn.execute("ALTER TABLE user_sessions ADD COLUMN user_agent TEXT NOT NULL DEFAULT ''")
+
+    conn.execute("UPDATE users SET username_lower = lower(username) WHERE username_lower IS NULL")
+
+    # Case-insensitive uniqueness ("Alice" and "alice" must not both exist). If an old
+    # database already has such a pair, do NOT crash startup: skip the index, warn, and
+    # let register_user's own check keep new duplicates out.
+    clash = conn.execute(
+        "SELECT username_lower FROM users GROUP BY username_lower HAVING COUNT(*) > 1"
+    ).fetchall()
+    if clash:
+        logger.warning("Accounts differ only by letter case (%d clash(es)); "
+                       "case-insensitive unique index NOT created. Merge or rename them.", len(clash))
+    else:
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower ON users(username_lower)")
 
 
 def _migrate(conn):
@@ -442,12 +496,29 @@ def load_session_state(chat_id: str) -> dict | None:
     }
 
 
+def _delete_chat_rows(conn, chat_id: str) -> None:
+    # Every table keyed by chat_id. (The interview tables used to be missed here, so
+    # deleting a chat left its mock-interview answers behind.)
+    for table in ("course_sessions", "progress", "notifications", "messages",
+                  "interview_qa", "interview_sessions", "user_chats"):
+        conn.execute(f"DELETE FROM {table} WHERE chat_id = ?", (chat_id,))
+
+
 def delete_session(chat_id: str):
     with get_connection() as conn:
-        conn.execute("DELETE FROM course_sessions WHERE chat_id = ?", (chat_id,))
-        conn.execute("DELETE FROM progress WHERE chat_id = ?", (chat_id,))
-        conn.execute("DELETE FROM notifications WHERE chat_id = ?", (chat_id,))
-        conn.execute("DELETE FROM user_chats WHERE chat_id = ?", (chat_id,))
+        _delete_chat_rows(conn, chat_id)
+
+
+def delete_user_account(user_id: int) -> None:
+    """Permanently remove an account and everything that belongs to it, in one transaction."""
+    with get_connection() as conn:
+        chats = [r["chat_id"] for r in conn.execute(
+            "SELECT chat_id FROM user_chats WHERE user_id = ?", (user_id,)).fetchall()]
+        for chat_id in chats:
+            _delete_chat_rows(conn, chat_id)
+        conn.execute("DELETE FROM shared_key_usage WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
 
 
 # ── Progress tracking ────────────────────────────────────────
@@ -562,68 +633,208 @@ def mark_notifications_read(chat_id: str):
 # ── Password & User Authentication Helpers ───────────────────
 
 def hash_password(password: str) -> str:
-    salt = secrets.token_hex(16)
-    hash_bytes = hashlib.pbkdf2_hmac(
-        'sha256',
-        password.encode('utf-8'),
-        salt.encode('utf-8'),
-        100000
-    )
-    return f"{salt}:{hash_bytes.hex()}"
+    return passwords.hash_password(password)
 
 
 def check_password(password: str, hashed: str) -> bool:
-    try:
-        salt, hash_hex = hashed.split(":")
-        hash_bytes = hashlib.pbkdf2_hmac(
-            'sha256',
-            password.encode('utf-8'),
-            salt.encode('utf-8'),
-            100000
-        )
-        return secrets.compare_digest(hash_bytes.hex(), hash_hex)
-    except Exception:
-        return False
+    return passwords.verify_password(password, hashed)
 
 
 def register_user(username: str, password_raw: str) -> int | None:
+    """Create an account. Returns the new user_id, or None if the name is taken
+    (case-insensitively: "Alice" is the same account name as "alice")."""
+    username_lower = username.lower()
+    hashed = passwords.hash_password(password_raw)
     try:
-        hashed = hash_password(password_raw)
         with get_connection() as conn:
+            if conn.execute("SELECT 1 FROM users WHERE username_lower = ?", (username_lower,)).fetchone():
+                return None
             row = conn.execute(
-                "INSERT INTO users (username, password_hash) VALUES (?, ?) RETURNING user_id",
-                (username, hashed)
+                "INSERT INTO users (username, username_lower, password_hash) VALUES (?, ?, ?) RETURNING user_id",
+                (username, username_lower, hashed)
             ).fetchone()
             return row["user_id"]
     except _IntegrityError:
-        return None
+        return None          # lost a race with a parallel sign-up of the same name
 
 
 def verify_user(username: str, password_raw: str) -> dict | None:
+    """Check credentials. Unknown user and wrong password take the same time and
+    return the same result, so the response never reveals which usernames exist.
+    A successful login silently upgrades an old PBKDF2 hash to scrypt."""
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT user_id, username, password_hash FROM users WHERE username = ?",
-            (username,)
+            "SELECT user_id, username, password_hash FROM users WHERE username_lower = ?",
+            (username.strip().lower(),)
         ).fetchone()
-    if row and check_password(password_raw, row["password_hash"]):
-        return {"user_id": row["user_id"], "username": row["username"]}
+    if not row:
+        passwords.burn_time_like_a_real_check(password_raw)
+        return None
+
+    # The first version trimmed passwords before hashing them, so for accounts made then
+    # the trimmed form is the real password. Try exactly what was typed first.
+    candidates = [password_raw]
+    if password_raw != password_raw.strip():
+        candidates.append(password_raw.strip())
+    for candidate in candidates:
+        if passwords.verify_password(candidate, row["password_hash"]):
+            if passwords.needs_rehash(row["password_hash"]):
+                with get_connection() as conn:
+                    conn.execute("UPDATE users SET password_hash = ? WHERE user_id = ?",
+                                 (passwords.hash_password(candidate), row["user_id"]))
+            return {"user_id": row["user_id"], "username": row["username"]}
     return None
 
 
-def create_user_session(user_id: int) -> str:
-    token = secrets.token_hex(32)
+def user_password_matches(user_id: int, password_raw: str) -> bool:
+    """Re-check the CURRENT password for sensitive actions (change password, delete account)."""
+    with get_connection() as conn:
+        row = conn.execute("SELECT password_hash FROM users WHERE user_id = ?", (user_id,)).fetchone()
+    if not row:
+        passwords.burn_time_like_a_real_check(password_raw)
+        return False
+    return passwords.verify_password(password_raw, row["password_hash"])
+
+
+def set_user_password(user_id: int, new_password_raw: str) -> None:
+    with get_connection() as conn:
+        conn.execute("UPDATE users SET password_hash = ? WHERE user_id = ?",
+                     (passwords.hash_password(new_password_raw), user_id))
+
+
+# ── Login throttling (stored in the database, so it works across serverless instances) ──
+
+def _now() -> int:
+    return int(time.time())
+
+
+# (failures allowed, counting window in seconds, lockout in seconds)
+LOGIN_ACCOUNT_LIMIT = (30, 3600, 900)    # per account, from anywhere: stops distributed guessing
+LOGIN_PAIR_LIMIT    = (5, 900, 900)      # per account + client address: stops one machine fast
+
+
+def _throttle_keys(username: str, ip: str) -> list[tuple[str, tuple]]:
+    ul = username.strip().lower()[:64]
+    return [(f"u:{ul}", LOGIN_ACCOUNT_LIMIT), (f"ui:{ul}|{ip}", LOGIN_PAIR_LIMIT)]
+
+
+def login_locked_for(username: str, ip: str) -> int:
+    """Seconds until this username/address may try again (0 = not locked)."""
+    keys = [k for k, _ in _throttle_keys(username, ip)]
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT locked_until FROM login_failures WHERE throttle_key IN (?, ?)", tuple(keys)
+        ).fetchall()
+    return max([r["locked_until"] - _now() for r in rows] + [0])
+
+
+def login_record_failure(username: str, ip: str) -> None:
+    now = _now()
+    with get_connection() as conn:
+        for key, (limit, window, lock) in _throttle_keys(username, ip):
+            conn.execute(
+                """INSERT INTO login_failures (throttle_key, fail_count, window_start, locked_until)
+                   VALUES (?, 1, ?, 0)
+                   ON CONFLICT(throttle_key) DO UPDATE SET
+                     fail_count   = CASE WHEN ? - login_failures.window_start >= ? THEN 1
+                                         ELSE login_failures.fail_count + 1 END,
+                     window_start = CASE WHEN ? - login_failures.window_start >= ? THEN ?
+                                         ELSE login_failures.window_start END""",
+                (key, now, now, window, now, window, now),
+            )
+            count = conn.execute(
+                "SELECT fail_count FROM login_failures WHERE throttle_key = ?", (key,)
+            ).fetchone()["fail_count"]
+            if count >= limit:
+                conn.execute("UPDATE login_failures SET locked_until = ? WHERE throttle_key = ?",
+                             (now + lock, key))
+
+
+def login_clear_failures(username: str, ip: str) -> None:
+    """A correct password clears the per-address counter. The per-account counter is left to
+    expire on its own so a lucky guess cannot be used to wipe an ongoing attack's count."""
+    pair_key = _throttle_keys(username, ip)[1][0]
+    with get_connection() as conn:
+        conn.execute("DELETE FROM login_failures WHERE throttle_key = ?", (pair_key,))
+
+
+def _hash_token(token: str) -> str:
+    """Only a SHA-256 digest of the bearer token is stored. If the database
+    leaks (backup, committed .db file, SQL injection) the digests cannot be
+    replayed as logins. Tokens are 256-bit random, so a plain fast hash is
+    enough here (unlike passwords, they can't be guessed)."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def create_user_session(user_id: int, user_agent: str = "") -> str:
+    token = secrets.token_hex(32)          # returned to the client, never stored
     with get_connection() as conn:
         conn.execute(
-            """INSERT INTO user_sessions (session_token, user_id, expires_at)
-               VALUES (?, ?, datetime('now', '+30 days'))""",
-            (token, user_id)
+            """INSERT INTO user_sessions (session_token, user_id, expires_at, user_agent)
+               VALUES (?, ?, datetime('now', '+30 days'), ?)""",
+            (_hash_token(token), user_id, (user_agent or "")[:200])
         )
     return token
 
 
+def _public_session_id(token_hash: str) -> str:
+    return token_hash[:16]
+
+
+def list_user_sessions(user_id: int, current_token: str | None) -> list[dict]:
+    """The devices signed in to this account. `id` is a prefix of the stored hash:
+    enough to pick a session to revoke, useless as a credential."""
+    current_hash = _hash_token(current_token) if current_token else None
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT session_token, created_at, user_agent FROM user_sessions
+               WHERE user_id = ? AND datetime('now') < expires_at
+               ORDER BY created_at DESC, session_token""",
+            (user_id,),
+        ).fetchall()
+    return [
+        {"id": _public_session_id(r["session_token"]), "created_at": r["created_at"],
+         "device": r["user_agent"] or "Unknown device", "current": r["session_token"] == current_hash}
+        for r in rows
+    ]
+
+
+def revoke_session_by_id(user_id: int, public_id: str) -> int:
+    with get_connection() as conn:
+        cur = conn.execute(
+            "DELETE FROM user_sessions WHERE user_id = ? AND substr(session_token, 1, 16) = ?",
+            (user_id, public_id),
+        )
+    return cur.rowcount
+
+
+def revoke_user_sessions(user_id: int, keep_token: str | None = None) -> int:
+    """Sign the account out everywhere (optionally keeping the session making the request)."""
+    with get_connection() as conn:
+        if keep_token:
+            cur = conn.execute("DELETE FROM user_sessions WHERE user_id = ? AND session_token != ?",
+                               (user_id, _hash_token(keep_token)))
+        else:
+            cur = conn.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
+    return cur.rowcount
+
+
+def get_user_by_token(token: str) -> dict | None:
+    if not token:
+        return None
+    with get_connection() as conn:
+        row = conn.execute(
+            """SELECT u.user_id, u.username FROM user_sessions s
+               JOIN users u ON s.user_id = u.user_id
+               WHERE s.session_token = ? AND datetime('now') < s.expires_at""",
+            (_hash_token(token),),
+        ).fetchone()
+    return {"user_id": row["user_id"], "username": row["username"]} if row else None
+
+
 def invalidate_user_session(token: str):
     with get_connection() as conn:
-        conn.execute("DELETE FROM user_sessions WHERE session_token = ?", (token,))
+        conn.execute("DELETE FROM user_sessions WHERE session_token = ?", (_hash_token(token),))
 
 
 def cleanup_expired_sessions():
@@ -634,6 +845,9 @@ def cleanup_expired_sessions():
         cur = conn.execute("DELETE FROM user_sessions WHERE datetime('now') >= expires_at")
         if cur.rowcount:
             logger.info("Purged %d expired sessions", cur.rowcount)
+        now = _now()
+        conn.execute("DELETE FROM login_failures WHERE locked_until < ? AND window_start < ?",
+                     (now, now - 86400))
 
 
 def check_or_register_chat(chat_id: str, user_id: int) -> bool:
@@ -659,20 +873,7 @@ def save_message(chat_id: str, role: str, content: str):
     """Save a single message to the messages table."""
     if not content or content == "__loading__":
         return
-    # Ensure messages table exists (non-destructive)
     with get_connection() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS messages (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                chat_id    TEXT NOT NULL,
-                role       TEXT NOT NULL,
-                content    TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL DEFAULT (datetime('now'))
-            )
-        """)
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, created_at)",
-        )
         conn.execute(
             "INSERT INTO messages (chat_id, role, content) VALUES (?, ?, ?)",
             (chat_id, role, content),
@@ -680,18 +881,19 @@ def save_message(chat_id: str, role: str, content: str):
 
 
 def get_session_messages(chat_id: str, limit: int = 100) -> list:
-    """Return all saved messages for a chat session."""
-    try:
-        with get_connection() as conn:
-            rows = conn.execute(
-                """SELECT role, content FROM messages
-                   WHERE chat_id = ? ORDER BY created_at ASC LIMIT ?""",
-                (chat_id, limit),
-            ).fetchall()
-        return [{"role": r["role"], "content": r["content"]} for r in rows]
-    except Exception:
-        # Table may not exist on older DBs — return empty gracefully
-        return []
+    """Return the saved messages for a chat session, oldest first.
+
+    Ordered by the auto-increment id: created_at only has 1-second resolution,
+    so messages saved in the same second used to come back in random order.
+    Errors are NOT swallowed any more — an empty list must mean "no messages",
+    not "the database failed"."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT role, content FROM messages
+               WHERE chat_id = ? ORDER BY id ASC LIMIT ?""",
+            (chat_id, limit),
+        ).fetchall()
+    return [{"role": r["role"], "content": r["content"]} for r in rows]
 
 
 def get_shared_key_usage(user_id: int) -> int:
@@ -703,6 +905,19 @@ def get_shared_key_usage(user_id: int) -> int:
             (user_id,),
         ).fetchone()
     return row["request_count"] if row else 0
+
+
+def refund_shared_key_request(user_id: int) -> None:
+    """Give back one reserved shared-key request (the AI call failed or never happened).
+
+    Uses the current UTC date. If a request straddles midnight the refund lands
+    on the new day's row (guarded by request_count > 0), which is harmless."""
+    with get_connection() as conn:
+        conn.execute(
+            """UPDATE shared_key_usage SET request_count = request_count - 1
+               WHERE user_id = ? AND usage_date = date('now') AND request_count > 0""",
+            (user_id,),
+        )
 
 
 def reserve_shared_key_request(user_id: int, daily_limit: int) -> tuple[bool, int]:

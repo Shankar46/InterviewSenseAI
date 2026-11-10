@@ -9,3 +9,9 @@ interviewsense.db
 interviewsense.db-shm
 interviewsense.db-wal
 interviewsense.db-journal
+*.db
+*.db-shm
+*.db-wal
+.pytest_cache/
+.vscode/
+node_modules/

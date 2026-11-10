@@ -19,15 +19,38 @@ const UI = (() => {
   const toastContainer = document.getElementById("toast-container");
 
   // ── Markdown rendering ─────────────────────────────────────
+  // AI output (and anything a user uploads that the AI repeats) is UNTRUSTED.
+  // marked does not sanitise, so its HTML must pass through DOMPurify before
+  // it touches innerHTML, otherwise "<img src=x onerror=...>" in a PDF can run
+  // script and steal the login token / Groq key from localStorage.
+  // Fail closed: if either library failed to load, show escaped plain text.
+  let _purifyHooked = false;
+  function _escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+
   function _renderMarkdown(content) {
     if (!content) return "";
-    if (window.marked && typeof marked.parse === "function") {
-      return marked.parse(content);
+    const ready = window.marked && typeof marked.parse === "function"
+               && window.DOMPurify && typeof DOMPurify.sanitize === "function";
+    if (!ready) return _escapeHtml(content).replace(/\n/g, "<br>");
+
+    if (!_purifyHooked) {
+      // Links from AI text open in a new tab without access to this page.
+      DOMPurify.addHook("afterSanitizeAttributes", node => {
+        if (node.tagName === "A") {
+          node.setAttribute("target", "_blank");
+          node.setAttribute("rel", "noopener noreferrer");
+        }
+      });
+      _purifyHooked = true;
     }
-    // Minimal fallback
-    return content
-      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-      .replace(/\n/g, "<br>");
+    return DOMPurify.sanitize(marked.parse(content), {
+      FORBID_TAGS: ["style", "form", "input", "button", "textarea", "select", "svg", "math"],
+      FORBID_ATTR: ["style"],
+    });
   }
 
   // ── Skeleton loader ────────────────────────────────────────
@@ -199,19 +222,25 @@ const UI = (() => {
     }
     if (npEmpty) npEmpty.style.display = "none";
 
+    const KNOWN_TYPES = new Set(["info", "success", "warning", "error"]);
+    const addDiv = (parent, cls, text) => {
+      const el = document.createElement("div");
+      el.className = cls;
+      el.textContent = text;          // textContent: never interpreted as HTML
+      parent.appendChild(el);
+    };
     notifications.forEach(n => {
       const item = document.createElement("div");
-      item.className = `notif-item ${n.type || "info"}`;
+      item.className = `notif-item ${KNOWN_TYPES.has(n.type) ? n.type : "info"}`;
       const time = n.created_at
         ? (typeof n.created_at === "string" && n.created_at.includes(":")
             ? n.created_at   // already formatted HH:MM
             : new Date(n.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))
         : "";
-      item.innerHTML = `
-        <div class="ni-title">${n.title}</div>
-        <div class="ni-body">${n.body || ""}</div>
-        ${time ? `<div class="ni-time">${time}</div>` : ""}
-      `;
+      // Titles/bodies include user-typed text (role, company), so they are text, not HTML.
+      addDiv(item, "ni-title", n.title || "");
+      addDiv(item, "ni-body", n.body || "");
+      if (time) addDiv(item, "ni-time", time);
       notifList.appendChild(item);
     });
   }
@@ -227,7 +256,13 @@ const UI = (() => {
     toast.className = `toast toast-${type}`;
 
     const icon = { info: "ℹ️", success: "✅", warning: "⚠️", error: "❌" }[type] || "ℹ️";
-    toast.innerHTML = `<span class="toast-icon">${icon}</span><span class="toast-msg">${message}</span>`;
+    const iconEl = document.createElement("span");
+    iconEl.className = "toast-icon";
+    iconEl.textContent = icon;
+    const msgEl = document.createElement("span");
+    msgEl.className = "toast-msg";
+    msgEl.textContent = message;       // server error text must never become HTML
+    toast.append(iconEl, msgEl);
 
     toastContainer.appendChild(toast);
     // Trigger animation
@@ -344,6 +379,7 @@ const UI = (() => {
   }
 
   return {
+    safeMarkdown: _renderMarkdown,
     renderMessages,
     renderSidebar,
     renderTracker,

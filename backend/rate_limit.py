@@ -18,6 +18,13 @@ _lock = threading.Lock()
 _hits: dict[str, deque] = defaultdict(deque)
 
 
+def client_ip() -> str:
+    """Best-effort client address. NOTE: X-Forwarded-For is client-controlled unless a
+    trusted proxy overwrites it; tightening this is on the serverless roadmap."""
+    fwd = request.headers.get("X-Forwarded-For", "")
+    return (fwd.split(",")[0].strip() if fwd else request.remote_addr) or "unknown"
+
+
 def _client_key():
     # Prefer authenticated user if available (set by login_required upstream),
     # fall back to IP. Authenticated keying prevents one user on a shared NAT
@@ -25,9 +32,7 @@ def _client_key():
     user = getattr(request, "user", None)
     if user:
         return f"user:{user['user_id']}"
-    fwd = request.headers.get("X-Forwarded-For", "")
-    ip = fwd.split(",")[0].strip() if fwd else request.remote_addr
-    return f"ip:{ip}"
+    return f"ip:{client_ip()}"
 
 
 def rate_limit(max_requests: int, window_seconds: int, scope: str = "default"):

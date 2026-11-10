@@ -192,7 +192,7 @@ const Interview = (() => {
     if (answerEl) answerEl.value = "";
 
     try {
-      const data = await Api.submitAnswer({ chatId, answer });
+      const data = await Api.submitAnswer({ chatId, answer, qNum: _currentQNum });
       Store.removeLoadingMessage(chatId);
 
       const fb = data.feedback || {};
@@ -235,7 +235,11 @@ const Interview = (() => {
       Store.removeLoadingMessage(chatId);
       Store.addMessage(chatId, "assistant", `⚠️ ${err.message}`);
       _renderInterviewMessages(Store.getMessages(chatId));
-      UI.showToast("Evaluation failed. Please try again.", "error");
+      // Nothing was saved on the server, so the same question is still open.
+      // Put the answer back so retrying is one click instead of retyping it.
+      const box = document.getElementById("iw-answer-input");
+      if (box && !box.value) box.value = answer;
+      UI.showToast("Could not grade your answer. It is still in the box. Press Send to try again.", "error");
     } finally {
       if (sendBtn) sendBtn.disabled = false;
     }
@@ -358,9 +362,8 @@ const Interview = (() => {
   function _buildWelcomeCard(text) {
     const div = document.createElement("div");
     div.className = "msg assistant iw-welcome-wrap";
-    let html = text || "";
-    if (window.marked && typeof marked.parse === "function") html = marked.parse(text);
-    div.innerHTML = `<div class="bubble iw-welcome">${html}</div>`;
+    // Same sanitising path as the chat bubbles (UI.safeMarkdown fails closed).
+    div.innerHTML = `<div class="bubble iw-welcome">${UI.safeMarkdown(text || "")}</div>`;
     return div;
   }
 
@@ -501,6 +504,17 @@ const Interview = (() => {
         <ul class="ir-improvements-list">
           ${report.improvement_areas.map(item => `<li>${_esc(item)}</li>`).join("")}
         </ul>
+      </div>` : ""}
+
+      ${report.overall_feedback_unavailable ? `
+      <div class="ir-feedback-section">
+        <p class="ir-feedback-text">The written review could not be generated right now. Your scores above are final.</p>
+      </div>` : ""}
+
+      ${report.weekly ? `
+      <div class="ir-feedback-section">
+        <h4>Weekly Milestone</h4>
+        <p class="ir-feedback-text">${report.weekly.passed ? "Passed" : "Not passed yet"} — an average of ${Number(report.weekly.required_avg)}/10 is needed. You can retake it any time.</p>
       </div>` : ""}
  
       ${typeBars ? `<div class="ir-type-section"><h4>Performance by Category</h4>${typeBars}</div>` : ""}

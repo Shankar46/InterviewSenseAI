@@ -94,6 +94,10 @@ const Auth = (() => {
   // ── Mode Switch ────────────────────────────────────────────
   function toggleMode() {
     isLoginMode = !isLoginMode;
+    // Tell the browser which kind of password this is, so its password manager can
+    // offer to GENERATE a strong one when signing up and to FILL one when signing in.
+    passwordInput.setAttribute("autocomplete", isLoginMode ? "current-password" : "new-password");
+    passwordInput.placeholder = isLoginMode ? "Enter your password" : "At least 8 characters";
     if (isLoginMode) {
       cardTitle.textContent = "Welcome Back";
       cardSub.textContent = "Please sign in to access your intelligence suite.";
@@ -114,21 +118,24 @@ const Auth = (() => {
     e.preventDefault();
 
     const uVal = usernameInput.value.trim();
-    const pVal = passwordInput.value.trim();
+    const pVal = passwordInput.value;       // exactly as typed: never trimmed (spaces are part of a password)
 
     if (!uVal || !pVal) {
       UI.showToast("All fields are required.", "warning");
       return;
     }
 
-    if (uVal.length < 3) {
-      UI.showToast("Username must be at least 3 characters.", "warning");
-      return;
-    }
-
-    if (pVal.length < 6) {
-      UI.showToast("Password must be at least 6 characters.", "warning");
-      return;
+    // Quick format checks apply to NEW accounts only. Signing in must accept whatever the
+    // account was created with; the server is the real judge of both.
+    if (!isLoginMode) {
+      if (uVal.length < 3) {
+        UI.showToast("Username must be at least 3 characters.", "warning");
+        return;
+      }
+      if (pVal.length < 8) {
+        UI.showToast("Password must be at least 8 characters.", "warning");
+        return;
+      }
     }
 
     submitBtn.disabled = true;
@@ -148,23 +155,19 @@ const Auth = (() => {
       const data = await res.json();
 
       if (res.ok) {
-        if (isLoginMode) {
-          // Store token & username
-          token = data.token;
-          username = data.username;
-          localStorage.setItem("isai_auth_token", token);
-          localStorage.setItem("isai_auth_username", username);
-          Store.rehydrate();
+        // Both sign-in and sign-up return a session: signing up logs you straight in
+        // (it used to bounce you back to the form to type everything again).
+        const wasSignUp = !isLoginMode;
+        token = data.token;
+        username = data.username;
+        localStorage.setItem("isai_auth_token", token);
+        localStorage.setItem("isai_auth_username", username);
+        Store.rehydrate();
 
-          // Update elements & change screens
-          updateUserBadges(username);
-          hideScreen();
-          UI.showToast(`Welcome back, ${username}!`, "success");
-        } else {
-          // Switch to login mode
-          toggleMode();
-          UI.showToast("Registration successful! Please sign in.", "success");
-        }
+        updateUserBadges(username);
+        hideScreen();
+        UI.showToast(wasSignUp ? `Account created. Welcome, ${username}!` : `Welcome back, ${username}!`, "success");
+        if (wasSignUp) toggleMode();          // next visit to this screen starts in sign-in mode
       } else {
         UI.showToast(data.message || "Authentication failed.", "warning");
       }

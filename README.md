@@ -152,3 +152,37 @@ python -m backend.main
 *Note: On startup, the backend automatically validates the database and executes migrations if any tables are outdated.*
 
 Open `frontend/index.html` in your browser or run it using a local live server extension.
+
+---
+
+## 🔐 API keys: shared key vs. BYOK ("bring your own key")
+
+There are two ways a request reaches the model:
+
+| Mode | Where the key lives | Limit |
+| :--- | :--- | :--- |
+| **Shared** | `GROQ_API_KEY` in the server environment (Vercel settings / local `.env`). It never reaches the browser. | `SHARED_KEY_DAILY_LIMIT` requests per user per UTC day (default 5) |
+| **BYOK** | The user's own Groq key, saved in *their* browser (`localStorage`) and sent only in the `X-Groq-API-Key` header of AI requests. | None from this app — their own Groq account limits apply |
+
+The shared allowance counts **AI answers you actually received**: a failed request, a cache hit, a greeting, or a command like `yes` / `status` does not use any of it.
+
+Rules the code follows: the server never stores or logs a BYOK key; BYOK requests do
+not use up the shared allowance; if the server key is missing, the app asks the user for
+their own key instead of failing silently.
+
+Because a BYOK key sits in `localStorage`, any script that runs on the page could read
+it. That is why all AI output is sanitised (DOMPurify), the libraries are pinned with
+integrity hashes, and a Content-Security-Policy is sent (see `vercel.json`).
+
+## 🧪 Running the tests
+```bash
+pip install -r requirements.txt pytest && pytest        # backend (real app + temp database)
+npm install && npm run test:frontend                    # browser-side XSS checks
+```
+
+## 👤 Accounts & security
+* Sign-up signs you in immediately. Passwords are hashed with scrypt, used exactly as typed, and must be 8-128 characters (no "symbol" rules; common passwords are rejected).
+* 5 wrong passwords lock that account from that address for 15 minutes; 30 from anywhere lock it for everyone. Unknown usernames behave identically.
+* `/api/auth/sessions`, `/api/auth/logout-all`, `/api/auth/change-password`, `/api/auth/delete-account` give you device management, password change (signs out other devices) and full account deletion.
+* Every route must be declared public / user-scoped / chat-scoped in `backend/tests/test_authorization.py`; the test suite fails if a new route is not classified.
+* Details and roadmap: `CHANGES_PHASE4A_AUTH.md`.

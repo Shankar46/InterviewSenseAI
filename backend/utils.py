@@ -21,14 +21,18 @@ MAX_EXTRACTED_CHARS = 20_000
 #      instruction (added in prompts.py) telling the model the content
 #      between delimiters is DATA to summarize/use, never instructions
 #      to follow.
+# NOTE: this is a best-effort speed bump, not a security boundary. The real
+# defences are (1) the data fences + system message, (2) validating model
+# output against a schema, and (3) never putting secrets in a prompt.
 _INJECTION_PATTERNS = re.compile(
-    r"(ignore (all |the |any )?(previous|prior|above) instructions?"
-    r"|disregard (all |the |any )?(previous|prior|above)"
-    r"|you are now [a-z]"
-    r"|system prompt"
-    r"|act as (an? )?(unrestricted|jailbroken|dan)"
-    r"|new instructions?:"
-    r"|override (your|the) (rules|instructions|guidelines))",
+    r"(ignore\s+(all\s+|the\s+|any\s+)?(previous|prior|above)\s+(instructions?|prompts?|rules)"
+    r"|disregard\s+(all\s+|the\s+|any\s+)?(previous|prior|above)(\s+(instructions?|prompts?|rules))?"
+    r"|forget\s+(everything|all)(\s+(above|before|previously))?"
+    r"|you\s+are\s+now\s+(an?\s+)?\w+"
+    r"|(reveal|print|show|repeat|output)\s+(your\s+|the\s+)?system\s+prompt"
+    r"|act\s+as\s+(an?\s+)?(unrestricted|jailbroken|dan)\b"
+    r"|new\s+instructions?\s*:"
+    r"|override\s+(your|the)\s+(rules|instructions|guidelines))",
     re.IGNORECASE,
 )
 
@@ -49,11 +53,14 @@ def sanitize_untrusted_text(text: str) -> str:
     return _INJECTION_PATTERNS.sub(_defuse, text)
 
 
-def wrap_untrusted(text: str, label: str = "DOCUMENT CONTENT") -> str:
+def wrap_untrusted(text: str, label: str = "DOCUMENT_CONTENT") -> str:
     """Wrap untrusted content in explicit delimiters for the prompt, paired
     with the system instruction in prompts.py that content between these
     markers is data only, never instructions."""
     safe = sanitize_untrusted_text(text)
+    # Untrusted text must not be able to close the fence early and "escape"
+    # into the instruction area by typing our own <<<..._END>>> marker.
+    safe = (safe or "").replace("<<<", "< < <").replace(">>>", "> > >")
     return f"<<<{label}_START>>>\n{safe}\n<<<{label}_END>>>"
 
 

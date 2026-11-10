@@ -63,8 +63,12 @@ const Store = (() => {
   }
 
   // ── ID generator ─────────────────────────────────────────
+  // Chat ids are the key to a user's stored data, so they must be unguessable:
+  // Date.now() + Math.random() is predictable. The server accepts this format.
   function _id() {
-    return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    if (window.crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+    const b = crypto.getRandomValues(new Uint8Array(16));          // very old browsers
+    return Array.from(b, x => x.toString(16).padStart(2, "0")).join("");
   }
 
   // Initialise from persisted state
